@@ -26,9 +26,14 @@ describe('Middleware', () => {
 
       await middleware(event, next);
 
+      // Logger formats message as single string
       expect(logSpy).toHaveBeenCalledWith(
-        expect.stringContaining('[WaSP]'),
-        expect.stringContaining('MESSAGE_RECEIVED'),
+        expect.stringContaining('[WaSP]')
+      );
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.stringContaining('MESSAGE_RECEIVED')
+      );
+      expect(logSpy).toHaveBeenCalledWith(
         expect.stringContaining('session-1')
       );
       expect(next).toHaveBeenCalled();

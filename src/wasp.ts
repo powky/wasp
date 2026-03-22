@@ -144,7 +144,7 @@ export class WaSP extends EventEmitter {
     try {
       await provider.connect(id, options);
 
-      // Update session status
+      // Update session status (provider's 'connected' event handler will also update this)
       session.status = 'CONNECTED' as SessionStatus;
       session.connectedAt = new Date();
       session.phone = provider.getPhoneNumber() ?? undefined;
@@ -152,13 +152,8 @@ export class WaSP extends EventEmitter {
 
       this.log('info', 'Session created', { sessionId: id, provider: session.provider });
 
-      // Emit connected event
-      await this.emitEvent({
-        type: 'SESSION_CONNECTED' as EventType,
-        sessionId: id,
-        timestamp: new Date(),
-        data: { phone: session.phone },
-      });
+      // Note: SESSION_CONNECTED event is emitted by setupProviderEvents handler
+      // Don't emit duplicate event here
 
       return session;
     } catch (error) {
@@ -377,6 +372,11 @@ export class WaSP extends EventEmitter {
    * Create provider instance
    */
   private async createProvider(type: ProviderType, options?: unknown): Promise<Provider> {
+    // Check if options include a mock provider instance (for testing)
+    if (options && typeof options === 'object' && 'mockProvider' in options) {
+      return (options as any).mockProvider as Provider;
+    }
+
     switch (type) {
       case 'BAILEYS': {
         const { BaileysProvider } = await import('./providers/baileys.js');

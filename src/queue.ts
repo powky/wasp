@@ -42,35 +42,58 @@ export class MessageQueue extends EventEmitter {
    * @returns Promise that resolves when message is sent
    */
   async enqueue(item: QueueItem): Promise<Message> {
-    return new Promise<Message>((resolve, reject) => {
-      const queueItem: QueueItem = {
-        ...item,
-        resolve,
-        reject,
-        queuedAt: new Date(),
-        priority: item.priority ?? 0,
+    // Get or create session queue
+    let queue = this.queues.get(item.sessionId);
+    if (!queue) {
+      queue = [];
+      this.queues.set(item.sessionId, queue);
+    }
+
+    // Create a promise that will be resolved when the item is processed
+    const promise = new Promise<Message>((promiseResolve, promiseReject) => {
+      // Store the original callbacks
+      const originalResolve = item.resolve;
+      const originalReject = item.reject;
+
+      // Wrap resolve to capture the result
+      item.resolve = (message?: Message) => {
+        // Call the original resolve
+        const result = originalResolve(message);
+
+        // If originalResolve returns a promise, wait for it and resolve with the result
+        if (result && typeof result === 'object' && 'then' in result) {
+          (result as Promise<Message>).then((msg) => {
+            promiseResolve(msg || ({} as Message));
+          }).catch(promiseReject);
+          return result;
+        } else {
+          // If it returns void, resolve with the message parameter or empty object
+          promiseResolve(message || ({} as Message));
+          return result;
+        }
       };
 
-      // Get or create session queue
-      let queue = this.queues.get(item.sessionId);
-      if (!queue) {
-        queue = [];
-        this.queues.set(item.sessionId, queue);
-      }
-
-      // Add to queue, sorted by priority (higher first)
-      queue.push(queueItem);
-      queue.sort((a, b) => b.priority - a.priority);
-
-      this.emit('enqueued', { sessionId: item.sessionId, queueSize: queue.length });
-
-      // Start processing if not already
-      if (!this.processing.get(item.sessionId)) {
-        this.processQueue(item.sessionId).catch((error) => {
-          this.emit('error', { sessionId: item.sessionId, error });
-        });
-      }
+      // Wrap reject
+      item.reject = (error: Error) => {
+        originalReject(error);
+        promiseReject(error);
+      };
     });
+
+    // Add to queue, sorted by priority (higher first)
+    queue.push(item);
+    queue.sort((a, b) => b.priority - a.priority);
+
+    this.emit('enqueued', { sessionId: item.sessionId, queueSize: queue.length });
+
+    // Start processing if not already
+    if (!this.processing.get(item.sessionId)) {
+      this.processQueue(item.sessionId).catch((error) => {
+        this.emit('error', { sessionId: item.sessionId, error });
+      });
+    }
+
+    return promise;
   }
 
   /**
@@ -89,30 +112,44 @@ export class MessageQueue extends EventEmitter {
         return;
       }
 
-      // Get next item
-      const item = queue.shift()!;
+      // Peek at next item (don't remove it yet)
+      const item = queue[0];
 
       // Calculate delay
       const delay = this.calculateDelay(sessionId, item);
 
-      // Wait for delay
+      // Wait for delay BEFORE removing from queue
+      // This allows higher priority items to jump ahead
       if (delay > 0) {
         this.emit('delay', { sessionId, delay, queueSize: queue.length });
         await this.sleep(delay);
       }
 
+      // Re-sort queue (in case higher priority items arrived during delay)
+      // and remove the highest priority item
+      queue.sort((a, b) => b.priority - a.priority);
+      const itemToSend = queue.shift()!;
+
       // Send message (will be handled by the caller's sendFn)
       try {
-        this.emit('sending', { sessionId, to: item.to });
+        this.emit('sending', { sessionId, to: itemToSend.to });
 
-        // Note: The actual sending is done by the WaSP instance
-        // This queue just manages timing and ordering
-        // The resolve/reject will be called by the sender
+        // Call the resolve function which does the actual work
+        // In tests, this might just resolve immediately
+        // In WaSP, this calls provider.sendMessage
+        const result = itemToSend.resolve();
 
-        this.lastSent.set(sessionId, Date.now());
-        this.emit('sent', { sessionId, queueSize: queue.length });
+        // If resolve returns a promise, await it to get the message
+        if (result && typeof result === 'object' && 'then' in result) {
+          const message = await result;
+          this.lastSent.set(sessionId, Date.now());
+          this.emit('sent', { sessionId, queueSize: queue.length, message });
+        } else {
+          this.lastSent.set(sessionId, Date.now());
+          this.emit('sent', { sessionId, queueSize: queue.length });
+        }
       } catch (error) {
-        item.reject(error as Error);
+        itemToSend.reject(error as Error);
         this.emit('error', { sessionId, error });
       }
 
@@ -153,10 +190,17 @@ export class MessageQueue extends EventEmitter {
     }
 
     // Check time since last message
-    const lastSent = this.lastSent.get(sessionId) ?? 0;
+    const lastSent = this.lastSent.get(sessionId);
+
+    // If this is the first message or enough time has passed since last message
+    if (!lastSent) {
+      // First message - use full delay
+      return this.randomDelay(this.options.minDelay, this.options.maxDelay);
+    }
+
     const timeSinceLastSent = Date.now() - lastSent;
 
-    // If enough time has passed, minimal delay
+    // If enough time has passed, use reduced delay
     if (timeSinceLastSent >= this.options.maxDelay) {
       return this.randomDelay(
         Math.floor(this.options.minDelay * 0.3),

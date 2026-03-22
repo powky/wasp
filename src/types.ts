@@ -322,8 +322,8 @@ export interface QueueItem {
   content: string;
   /** Send options */
   options?: SendMessageOptions;
-  /** Promise resolve */
-  resolve: (message: Message) => void;
+  /** Promise resolve - can return void or Promise<Message> */
+  resolve: (message?: Message) => void | Promise<Message>;
   /** Promise reject */
   reject: (error: Error) => void;
   /** Timestamp when queued */

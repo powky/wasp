@@ -5,6 +5,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { WaSP } from '../wasp.js';
 import { MemoryStore } from '../stores/memory.js';
+import { MockProvider } from '../providers/mock.js';
 import { SessionStatus, ProviderType, EventType } from '../types.js';
 
 describe('WaSP', () => {
@@ -16,6 +17,15 @@ describe('WaSP', () => {
       store: new MemoryStore(),
     });
   });
+
+  // Helper to create session with mock provider
+  const createMockSession = async (id: string, options?: { orgId?: string; metadata?: Record<string, unknown> }) => {
+    const mockProvider = new MockProvider({ connectionDelay: 10, sendDelay: 5 });
+    return await wasp.createSession(id, 'BAILEYS' as ProviderType, {
+      ...options,
+      mockProvider,
+    });
+  };
 
   describe('Instance creation', () => {
     it('should create WaSP instance with default config', () => {
@@ -40,7 +50,7 @@ describe('WaSP', () => {
 
   describe('Session lifecycle', () => {
     it('should create a session', async () => {
-      const session = await wasp.createSession('test-session-1', 'BAILEYS' as ProviderType);
+      const session = await createMockSession('test-session-1');
 
       expect(session).toBeDefined();
       expect(session.id).toBe('test-session-1');
@@ -50,7 +60,7 @@ describe('WaSP', () => {
     });
 
     it('should create session with metadata', async () => {
-      const session = await wasp.createSession('test-session-2', 'BAILEYS' as ProviderType, {
+      const session = await createMockSession('test-session-2', {
         orgId: 'org-123',
         metadata: { userId: 'user-456', plan: 'pro' },
       });
@@ -60,15 +70,15 @@ describe('WaSP', () => {
     });
 
     it('should not create duplicate session', async () => {
-      await wasp.createSession('duplicate-test', 'BAILEYS' as ProviderType);
+      await createMockSession('duplicate-test');
 
       await expect(
-        wasp.createSession('duplicate-test', 'BAILEYS' as ProviderType)
+        createMockSession('duplicate-test')
       ).rejects.toThrow('Session duplicate-test already exists');
     });
 
     it('should get session by ID', async () => {
-      await wasp.createSession('get-test', 'BAILEYS' as ProviderType);
+      await createMockSession('get-test');
       const session = await wasp.getSession('get-test');
 
       expect(session).toBeDefined();
@@ -81,17 +91,17 @@ describe('WaSP', () => {
     });
 
     it('should list all sessions', async () => {
-      await wasp.createSession('session-1', 'BAILEYS' as ProviderType);
-      await wasp.createSession('session-2', 'BAILEYS' as ProviderType);
-      await wasp.createSession('session-3', 'BAILEYS' as ProviderType);
+      await createMockSession('session-1');
+      await createMockSession('session-2');
+      await createMockSession('session-3');
 
       const sessions = await wasp.listSessions();
       expect(sessions).toHaveLength(3);
     });
 
     it('should list sessions with filter', async () => {
-      await wasp.createSession('org-1-session', 'BAILEYS' as ProviderType, { orgId: 'org-1' });
-      await wasp.createSession('org-2-session', 'BAILEYS' as ProviderType, { orgId: 'org-2' });
+      await createMockSession('org-1-session', { orgId: 'org-1' });
+      await createMockSession('org-2-session', { orgId: 'org-2' });
 
       const org1Sessions = await wasp.listSessions({ orgId: 'org-1' });
       expect(org1Sessions).toHaveLength(1);
@@ -99,7 +109,7 @@ describe('WaSP', () => {
     });
 
     it('should destroy a session', async () => {
-      await wasp.createSession('destroy-test', 'BAILEYS' as ProviderType);
+      await createMockSession('destroy-test');
       expect(wasp.getSessionCount()).toBe(1);
 
       await wasp.destroySession('destroy-test');
@@ -121,7 +131,7 @@ describe('WaSP', () => {
       const handler = vi.fn();
       wasp.on('SESSION_CONNECTED' as EventType, handler);
 
-      await wasp.createSession('event-test', 'BAILEYS' as ProviderType);
+      await createMockSession('event-test');
 
       expect(handler).toHaveBeenCalled();
       expect(handler.mock.calls[0][0].type).toBe('SESSION_CONNECTED');
@@ -132,7 +142,7 @@ describe('WaSP', () => {
       const handler = vi.fn();
       wasp.on('*', handler);
 
-      await wasp.createSession('wildcard-test', 'BAILEYS' as ProviderType);
+      await createMockSession('wildcard-test');
 
       expect(handler).toHaveBeenCalled();
       expect(handler.mock.calls[0][0].sessionId).toBe('wildcard-test');
@@ -141,7 +151,7 @@ describe('WaSP', () => {
 
   describe('Message queue', () => {
     it('should respect message priority', async () => {
-      const session = await wasp.createSession('priority-test', 'BAILEYS' as ProviderType);
+      const session = await createMockSession('priority-test');
 
       // Queue low priority message
       const lowPromise = wasp.sendMessage('priority-test', '27821234567', 'Low priority', {
@@ -155,10 +165,10 @@ describe('WaSP', () => {
 
       // Both should complete (high priority processed first due to queue sorting)
       await Promise.all([lowPromise, highPromise]);
-    });
+    }, 15000); // Timeout: 2 messages * maxDelay (5000ms) + buffer
 
     it('should send immediate messages without delay', async () => {
-      await wasp.createSession('immediate-test', 'BAILEYS' as ProviderType);
+      await createMockSession('immediate-test');
 
       const start = Date.now();
       await wasp.sendMessage('immediate-test', '27821234567', 'Immediate message', {
@@ -182,20 +192,31 @@ describe('WaSP', () => {
   describe('Middleware', () => {
     it('should execute middleware in order', async () => {
       const order: number[] = [];
+      let eventCount = 0;
 
       wasp.use(async (event, next) => {
-        order.push(1);
+        // Only track the first event to avoid duplicates from provider
+        if (eventCount === 0) {
+          order.push(1);
+        }
         await next();
-        order.push(4);
+        if (eventCount === 0) {
+          order.push(4);
+          eventCount++;
+        }
       });
 
       wasp.use(async (event, next) => {
-        order.push(2);
+        if (eventCount === 0) {
+          order.push(2);
+        }
         await next();
-        order.push(3);
+        if (eventCount === 0) {
+          order.push(3);
+        }
       });
 
-      await wasp.createSession('middleware-test', 'BAILEYS' as ProviderType);
+      await createMockSession('middleware-test');
 
       // Wait for event processing
       await new Promise((resolve) => setTimeout(resolve, 100));
