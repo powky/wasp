@@ -503,6 +503,18 @@ export class BaileysProvider implements Provider {
   }
 
   /**
+   * Get raw WASocket instance
+   *
+   * Useful for advanced operations like media downloads,
+   * presence updates, group operations, etc.
+   *
+   * @returns WASocket instance or null if not connected
+   */
+  getSocket(): BaileysSocket | null {
+    return this.socket;
+  }
+
+  /**
    * Normalize Baileys message to WaSP format
    */
   private normalizeMessage(msg: WAMessage, getContentType: any): Message | null {

@@ -10,6 +10,7 @@
 // Main exports
 export { WaSP } from './wasp.js';
 export { MessageQueue } from './queue.js';
+export { WebhookManager } from './webhook.js';
 
 // Types
 export type {
@@ -24,6 +25,8 @@ export type {
   Middleware,
   SessionMetadata,
   QuotedMessage,
+  WebhookConfig,
+  HealthStats,
 } from './types.js';
 
 export {

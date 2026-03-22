@@ -283,6 +283,22 @@ export interface Store {
 }
 
 /**
+ * Webhook configuration
+ */
+export interface WebhookConfig {
+  /** Webhook URL to POST events to */
+  url: string;
+  /** HMAC signing secret (optional) */
+  secret?: string;
+  /** Event filter - which events to send (default: all) */
+  events?: EventType[];
+  /** Number of retry attempts on failure (default: 3) */
+  retries?: number;
+  /** Request timeout in ms (default: 5000) */
+  timeout?: number;
+}
+
+/**
  * WaSP configuration
  */
 export interface WaspConfig {
@@ -305,6 +321,9 @@ export interface WaspConfig {
     warn: (message: string, ...args: unknown[]) => void;
     error: (message: string, ...args: unknown[]) => void;
   };
+
+  /** Webhook configurations */
+  webhooks?: WebhookConfig[];
 }
 
 /**
@@ -334,4 +353,28 @@ export interface QueueItem {
   queuedAt: Date;
   /** Priority */
   priority: number;
+}
+
+/**
+ * Health/stats information
+ */
+export interface HealthStats {
+  /** Uptime in milliseconds */
+  uptime: number;
+  /** Session statistics */
+  sessions: {
+    total: number;
+    connected: number;
+    disconnected: number;
+  };
+  /** Message statistics */
+  messages: {
+    sent: number;
+    received: number;
+  };
+  /** Memory usage */
+  memory: {
+    heapUsed: number;
+    heapTotal: number;
+  };
 }

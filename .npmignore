@@ -21,15 +21,31 @@ node_modules/
 tsconfig.json
 vitest.config.ts
 .eslintrc.js
+.eslintrc.json
 .prettierrc
 
-# Docs
+# Examples (ship examples)
+# examples/
+
+# Docker (ship Docker files for users)
+# Dockerfile
+# docker-compose.yml
+# docker-compose.dev.yml
+
+# Auth states (local sessions)
+auth_states/
+
+# Docs (ship README and CHANGELOG)
 docs/
 *.md
 !README.md
+!CHANGELOG.md
+!LICENSE
 
 # Misc
 .DS_Store
 *.log
 .env
 .env.*
+CONTRIBUTING.md
+UPGRADE_SUMMARY.md

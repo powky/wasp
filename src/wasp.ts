@@ -9,6 +9,7 @@ import { EventEmitter } from 'events';
 import { MessageQueue } from './queue.js';
 import { MemoryStore } from './stores/memory.js';
 import { SessionNotFoundError } from './errors.js';
+import { WebhookManager } from './webhook.js';
 import type {
   WaspConfig,
   Session,
@@ -22,12 +23,13 @@ import type {
   EventType,
   Middleware,
   QueueItem,
+  HealthStats,
 } from './types.js';
 
 /**
  * Default WaSP configuration
  */
-const DEFAULT_CONFIG: Required<Omit<WaspConfig, 'logger'>> & Pick<WaspConfig, 'logger'> = {
+const DEFAULT_CONFIG: Required<Omit<WaspConfig, 'logger' | 'webhooks'>> & Pick<WaspConfig, 'logger' | 'webhooks'> = {
   store: new MemoryStore(),
   queue: {
     minDelay: 2000,
@@ -38,6 +40,7 @@ const DEFAULT_CONFIG: Required<Omit<WaspConfig, 'logger'>> & Pick<WaspConfig, 'l
   defaultProvider: 'BAILEYS' as ProviderType,
   debug: false,
   logger: undefined,
+  webhooks: undefined,
 };
 
 /**
@@ -70,11 +73,17 @@ const DEFAULT_CONFIG: Required<Omit<WaspConfig, 'logger'>> & Pick<WaspConfig, 'l
  * ```
  */
 export class WaSP extends EventEmitter {
-  private config: Required<Omit<WaspConfig, 'logger'>> & Pick<WaspConfig, 'logger'>;
+  private config: Required<Omit<WaspConfig, 'logger' | 'webhooks'>> & Pick<WaspConfig, 'logger' | 'webhooks'>;
   private store: Store;
   private queue: MessageQueue;
   private sessions: Map<string, { session: Session; provider: Provider }> = new Map();
   private middlewares: Middleware[] = [];
+  private webhookManager: WebhookManager | null = null;
+  private startTime: number = Date.now();
+  private messageStats = {
+    sent: 0,
+    received: 0,
+  };
 
   constructor(config?: WaspConfig) {
     super();
@@ -87,6 +96,11 @@ export class WaSP extends EventEmitter {
 
     this.store = config?.store ?? new MemoryStore();
     this.queue = new MessageQueue(this.config.queue);
+
+    // Setup webhooks if configured
+    if (config?.webhooks && config.webhooks.length > 0) {
+      this.webhookManager = new WebhookManager(config.webhooks, this.config.logger);
+    }
 
     // Setup queue event forwarding
     this.setupQueueEvents();
@@ -273,6 +287,8 @@ export class WaSP extends EventEmitter {
     if (options?.immediate) {
       const message = await provider.sendMessage(to, content, options);
 
+      this.messageStats.sent++;
+
       await this.emitEvent({
         type: 'MESSAGE_SENT' as EventType,
         sessionId,
@@ -297,6 +313,8 @@ export class WaSP extends EventEmitter {
       resolve: async (_message: Message) => {
         // This will be called when queue processes the item
         const sent = await provider.sendMessage(to, content, options);
+
+        this.messageStats.sent++;
 
         await this.emitEvent({
           type: 'MESSAGE_SENT' as EventType,
@@ -373,6 +391,67 @@ export class WaSP extends EventEmitter {
   }
 
   /**
+   * Get provider for a specific session
+   *
+   * @param sessionId Session ID
+   * @returns Provider instance or null if session not found
+   */
+  getProvider(sessionId: string): Provider | null {
+    const entry = this.sessions.get(sessionId);
+    return entry?.provider ?? null;
+  }
+
+  /**
+   * Get all active session IDs
+   *
+   * @returns Array of session IDs
+   */
+  getSessions(): string[] {
+    return Array.from(this.sessions.keys());
+  }
+
+  /**
+   * Get health and statistics
+   *
+   * Returns current system health including uptime, session counts,
+   * message statistics, and memory usage.
+   *
+   * @returns Health stats
+   *
+   * @example
+   * ```typescript
+   * const health = wasp.getHealth();
+   * console.log('Uptime:', health.uptime);
+   * console.log('Connected sessions:', health.sessions.connected);
+   * console.log('Messages sent:', health.messages.sent);
+   * ```
+   */
+  getHealth(): HealthStats {
+    const sessions = Array.from(this.sessions.values());
+    const connectedCount = sessions.filter((s) => s.session.status === 'CONNECTED').length;
+    const disconnectedCount = sessions.length - connectedCount;
+
+    const memUsage = process.memoryUsage();
+
+    return {
+      uptime: Date.now() - this.startTime,
+      sessions: {
+        total: sessions.length,
+        connected: connectedCount,
+        disconnected: disconnectedCount,
+      },
+      messages: {
+        sent: this.messageStats.sent,
+        received: this.messageStats.received,
+      },
+      memory: {
+        heapUsed: memUsage.heapUsed,
+        heapTotal: memUsage.heapTotal,
+      },
+    };
+  }
+
+  /**
    * Create provider instance
    */
   private async createProvider(type: ProviderType, options?: unknown): Promise<Provider> {
@@ -441,6 +520,8 @@ export class WaSP extends EventEmitter {
 
     // Message received
     provider.events.on('message', async (message: Message) => {
+      this.messageStats.received++;
+
       await this.store.update(sessionId, { lastActivityAt: new Date() });
 
       await this.emitEvent({
@@ -488,6 +569,14 @@ export class WaSP extends EventEmitter {
         // End of chain - emit to listeners
         this.emit(event.type, event);
         this.emit('*', event);
+
+        // Deliver to webhooks (fire-and-forget)
+        if (this.webhookManager) {
+          this.webhookManager.deliverEvent(event).catch((error) => {
+            this.log('error', 'Webhook delivery error', { event, error });
+          });
+        }
+
         return;
       }
 

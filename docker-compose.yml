@@ -1,0 +1,49 @@
+version: '3.8'
+
+services:
+  # WaSP application
+  wasp:
+    build: .
+    container_name: wasp-app
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      # Add your webhook URL
+      - WEBHOOK_URL=${WEBHOOK_URL:-}
+    volumes:
+      # Persist auth states
+      - ./auth_states:/app/auth_states
+    depends_on:
+      - redis
+    networks:
+      - wasp-network
+
+  # Redis for session persistence
+  redis:
+    image: redis:7-alpine
+    container_name: wasp-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - wasp-network
+
+  # Optional: Webhook testing service
+  webhook-test:
+    image: webhook/webhook-tester
+    container_name: wasp-webhook-test
+    ports:
+      - "8080:8080"
+    networks:
+      - wasp-network
+
+volumes:
+  redis-data:
+
+networks:
+  wasp-network:
+    driver: bridge
