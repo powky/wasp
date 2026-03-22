@@ -467,8 +467,10 @@ export class WaSP extends EventEmitter {
       }
       case 'WHATSMEOW':
         throw new Error('Whatsmeow provider not yet implemented');
-      case 'CLOUD_API':
-        throw new Error('Cloud API provider not yet implemented');
+      case 'CLOUD_API': {
+        const { CloudAPIProvider } = await import('./providers/cloud-api.js');
+        return new CloudAPIProvider(options as any);
+      }
       default:
         throw new Error(`Unknown provider type: ${type}`);
     }

@@ -46,6 +46,19 @@ export type { PostgresStoreConfig } from './stores/postgres.js';
 // Providers
 export { BaileysProvider } from './providers/baileys.js';
 export type { BaileysProviderOptions } from './providers/baileys.js';
+export { CloudAPIProvider } from './providers/cloud-api.js';
+export type {
+  CloudAPIProviderOptions,
+  InteractiveMessage,
+  InteractiveButton,
+  ListSection,
+  TemplateMessage,
+  LocationMessage,
+  ContactMessage,
+  MediaMessage,
+  ReactionMessage,
+  CloudAPIMessageContent,
+} from './providers/cloud-api.js';
 
 // Middleware
 export {
