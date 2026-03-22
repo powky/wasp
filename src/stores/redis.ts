@@ -6,6 +6,7 @@
  */
 
 import type { Session, Store } from '../types.js';
+import { SessionNotFoundError } from '../errors.js';
 
 // Redis client type - dynamically imported
 type RedisClient = any;
@@ -115,7 +116,7 @@ export class RedisStore implements Store {
    * Serialize session to JSON (handle Date fields)
    */
   private serialize(session: Session): string {
-    return JSON.stringify(session, (key, value) => {
+    return JSON.stringify(session, (_key, value) => {
       if (value instanceof Date) {
         return value.toISOString();
       }
@@ -187,7 +188,7 @@ export class RedisStore implements Store {
    * List all sessions matching filter
    * Uses SCAN to avoid blocking (not KEYS)
    */
-  async list(filter?: Partial<Session>): Promise<Session[]> {
+  async list(filter?: Partial<Session>, limit?: number, offset?: number): Promise<Session[]> {
     await this.ensureInitialized();
     if (!this.redis) throw new Error('Redis not initialized');
 
@@ -235,7 +236,16 @@ export class RedisStore implements Store {
       }
     }
 
-    return sessions;
+    // Apply pagination
+    let result = sessions;
+    if (offset !== undefined && offset > 0) {
+      result = result.slice(offset);
+    }
+    if (limit !== undefined && limit > 0) {
+      result = result.slice(0, limit);
+    }
+
+    return result;
   }
 
   /**
@@ -256,7 +266,7 @@ export class RedisStore implements Store {
   async update(id: string, updates: Partial<Session>): Promise<void> {
     const session = await this.load(id);
     if (!session) {
-      throw new Error(`Session ${id} not found`);
+      throw new SessionNotFoundError(id);
     }
 
     const updated = { ...session, ...updates };

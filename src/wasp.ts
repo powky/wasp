@@ -8,6 +8,7 @@
 import { EventEmitter } from 'events';
 import { MessageQueue } from './queue.js';
 import { MemoryStore } from './stores/memory.js';
+import { SessionNotFoundError } from './errors.js';
 import type {
   WaspConfig,
   Session,
@@ -174,10 +175,13 @@ export class WaSP extends EventEmitter {
   async destroySession(id: string): Promise<void> {
     const entry = this.sessions.get(id);
     if (!entry) {
-      throw new Error(`Session ${id} not found`);
+      throw new SessionNotFoundError(id);
     }
 
     const { provider } = entry;
+
+    // Remove all event listeners to prevent memory leak
+    provider.events.removeAllListeners();
 
     // Disconnect provider
     await provider.disconnect();
@@ -260,7 +264,7 @@ export class WaSP extends EventEmitter {
   ): Promise<Message> {
     const entry = this.sessions.get(sessionId);
     if (!entry) {
-      throw new Error(`Session ${sessionId} not found`);
+      throw new SessionNotFoundError(sessionId);
     }
 
     const { provider } = entry;

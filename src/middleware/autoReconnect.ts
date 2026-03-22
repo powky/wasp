@@ -35,7 +35,7 @@ export function autoReconnect(options?: AutoReconnectOptions): Middleware {
   return async (event: WaspEvent, next: () => Promise<void>) => {
     if (event.type === 'SESSION_DISCONNECTED') {
       const { sessionId } = event;
-      const { shouldReconnect } = event.data as { shouldReconnect: boolean };
+      const { shouldReconnect, reason } = event.data as { shouldReconnect: boolean; reason?: string };
 
       if (shouldReconnect) {
         const attempts = reconnectAttempts.get(sessionId) ?? 0;
@@ -50,6 +50,11 @@ export function autoReconnect(options?: AutoReconnectOptions): Middleware {
           // This middleware just tracks attempts and delays
         } else {
           console.log(`[AutoReconnect] Session ${sessionId} exceeded max reconnect attempts (${maxAttempts})`);
+          reconnectAttempts.delete(sessionId);
+        }
+      } else {
+        // If not reconnecting (permanent disconnect), clean up tracking
+        if (reason === 'destroyed' || reason === 'loggedOut' || reason === 'replaced') {
           reconnectAttempts.delete(sessionId);
         }
       }

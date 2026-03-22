@@ -177,6 +177,8 @@ export interface QueueOptions {
   maxConcurrent: number;
   /** Enable priority lanes (priority messages skip delay) */
   priorityLanes: boolean;
+  /** Maximum queue size per session (0 = unlimited) */
+  maxQueueSize?: number;
 }
 
 /**
@@ -261,8 +263,10 @@ export interface Store {
   /**
    * List all sessions
    * @param filter Optional filter criteria
+   * @param limit Optional limit on number of results
+   * @param offset Optional offset for pagination
    */
-  list(filter?: Partial<Session>): Promise<Session[]>;
+  list(filter?: Partial<Session>, limit?: number, offset?: number): Promise<Session[]>;
 
   /**
    * Check if session exists

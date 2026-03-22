@@ -51,3 +51,12 @@ export {
   rateLimit,
   errorHandler,
 } from './middleware.js';
+
+// Errors
+export {
+  SessionNotFoundError,
+  NotConnectedError,
+  InvalidSessionIdError,
+  QueueFullError,
+  InvalidTableNameError,
+} from './errors.js';

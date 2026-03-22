@@ -6,6 +6,7 @@
  */
 
 import type { Session, Store } from '../types.js';
+import { SessionNotFoundError } from '../errors.js';
 
 /**
  * In-memory session store
@@ -38,7 +39,7 @@ export class MemoryStore implements Store {
   /**
    * List all sessions
    */
-  async list(filter?: Partial<Session>): Promise<Session[]> {
+  async list(filter?: Partial<Session>, limit?: number, offset?: number): Promise<Session[]> {
     let sessions = Array.from(this.sessions.values());
 
     // Apply filters if provided
@@ -51,6 +52,14 @@ export class MemoryStore implements Store {
         }
         return true;
       });
+    }
+
+    // Apply pagination
+    if (offset !== undefined && offset > 0) {
+      sessions = sessions.slice(offset);
+    }
+    if (limit !== undefined && limit > 0) {
+      sessions = sessions.slice(0, limit);
     }
 
     // Return copies to prevent external mutation
@@ -70,7 +79,7 @@ export class MemoryStore implements Store {
   async update(id: string, updates: Partial<Session>): Promise<void> {
     const session = this.sessions.get(id);
     if (!session) {
-      throw new Error(`Session ${id} not found`);
+      throw new SessionNotFoundError(id);
     }
 
     // Merge updates

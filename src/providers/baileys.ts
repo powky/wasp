@@ -15,6 +15,7 @@ import type {
   SendMessageOptions,
 } from '../types.js';
 import { MessageType, EventType } from '../types.js';
+import { InvalidSessionIdError, NotConnectedError } from '../errors.js';
 
 // Baileys types - dynamically imported
 type BaileysSocket = any;
@@ -36,6 +37,8 @@ export interface BaileysProviderOptions {
   proxyUrl?: string;
   /** Maximum reconnection attempts */
   maxReconnectAttempts?: number;
+  /** Allowed media directory (for file path security) */
+  allowedMediaDir?: string;
 }
 
 /**
@@ -84,6 +87,7 @@ export class BaileysProvider implements Provider {
       logger: options?.logger ?? { level: 'silent', child: () => ({ level: 'silent' }) },
       proxyUrl: options?.proxyUrl ?? '',
       maxReconnectAttempts: options?.maxReconnectAttempts ?? 5,
+      allowedMediaDir: options?.allowedMediaDir ?? '',
     };
 
     // Ensure auth directory exists
@@ -111,6 +115,11 @@ export class BaileysProvider implements Provider {
    * Connect to WhatsApp using Baileys
    */
   async connect(sessionId: string, _options?: unknown): Promise<void> {
+    // Validate session ID to prevent path traversal
+    if (!/^[a-zA-Z0-9_-]+$/.test(sessionId)) {
+      throw new InvalidSessionIdError(sessionId);
+    }
+
     if (this.isConnecting) {
       return;
     }
@@ -131,6 +140,7 @@ export class BaileysProvider implements Provider {
       let getContentType: any;
 
       try {
+        // @ts-ignore - Optional peer dependency, dynamically imported
         const baileys = await import('@whiskeysockets/baileys');
         makeWASocket = baileys.default;
         useMultiFileAuthState = baileys.useMultiFileAuthState;
@@ -155,6 +165,7 @@ export class BaileysProvider implements Provider {
       if (this.options.proxyUrl) {
         try {
           // Note: socks-proxy-agent is optional - users must install separately
+          // @ts-ignore - Optional peer dependency, dynamically imported
           const module = await import('socks-proxy-agent');
           const SocksProxyAgent = (module as any).SocksProxyAgent;
           agent = new SocksProxyAgent(this.options.proxyUrl);
@@ -388,7 +399,7 @@ export class BaileysProvider implements Provider {
     options?: SendMessageOptions
   ): Promise<Message> {
     if (!this.socket || !this._connected) {
-      throw new Error('Not connected');
+      throw new NotConnectedError();
     }
 
     try {
@@ -406,7 +417,18 @@ export class BaileysProvider implements Provider {
           if (options.media.startsWith('http://') || options.media.startsWith('https://')) {
             message.image = { url: options.media };
           } else {
-            // File path
+            // File path - validate it's within allowed directory
+            if (this.options.allowedMediaDir) {
+              const resolvedPath = path.resolve(options.media);
+              const allowedDir = path.resolve(this.options.allowedMediaDir);
+
+              if (!resolvedPath.startsWith(allowedDir)) {
+                throw new Error(`Media file path must be within allowed directory: ${allowedDir}`);
+              }
+            } else {
+              throw new Error('File path media requires allowedMediaDir to be configured for security');
+            }
+
             message.image = fs.readFileSync(options.media);
           }
         } else {
@@ -451,7 +473,7 @@ export class BaileysProvider implements Provider {
    */
   async sendReaction(_messageId: string, _emoji: string): Promise<void> {
     if (!this.socket || !this._connected) {
-      throw new Error('Not connected');
+      throw new NotConnectedError();
     }
 
     // Note: This requires the message key which we don't have in the current interface

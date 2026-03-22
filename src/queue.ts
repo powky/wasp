@@ -7,6 +7,7 @@
 
 import { EventEmitter } from 'events';
 import type { QueueOptions, QueueItem, Message } from './types.js';
+import { QueueFullError } from './errors.js';
 
 /**
  * Default queue configuration
@@ -16,6 +17,7 @@ const DEFAULT_QUEUE_OPTIONS: QueueOptions = {
   maxDelay: 5000, // 5 seconds
   maxConcurrent: 1, // Process one message at a time per session
   priorityLanes: true,
+  maxQueueSize: 1000, // Default max queue size
 };
 
 /**
@@ -47,6 +49,12 @@ export class MessageQueue extends EventEmitter {
     if (!queue) {
       queue = [];
       this.queues.set(item.sessionId, queue);
+    }
+
+    // Check queue size limit
+    const maxSize = this.options.maxQueueSize ?? 0;
+    if (maxSize > 0 && queue.length >= maxSize) {
+      throw new QueueFullError(item.sessionId, maxSize);
     }
 
     // Create a promise that will be resolved when the item is processed
@@ -266,6 +274,7 @@ export class MessageQueue extends EventEmitter {
       this.queues.delete(sessionId);
     }
     this.processing.delete(sessionId);
+    this.lastSent.delete(sessionId);
   }
 
   /**
@@ -275,6 +284,10 @@ export class MessageQueue extends EventEmitter {
     for (const sessionId of this.queues.keys()) {
       this.clearQueue(sessionId);
     }
+    // Ensure all maps are cleared
+    this.queues.clear();
+    this.processing.clear();
+    this.lastSent.clear();
   }
 
   /**

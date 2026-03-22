@@ -43,8 +43,9 @@
   },
   "homepage": "https://github.com/kobie3717/wasp#readme",
   "devDependencies": {
+    "@types/ioredis": "^4.28.10",
     "@types/node": "^20.17.6",
-    "@types/pg": "^8.11.10",
+    "@types/pg": "^8.20.0",
     "@typescript-eslint/eslint-plugin": "^7.18.0",
     "@typescript-eslint/parser": "^7.18.0",
     "@vitest/coverage-v8": "^1.6.1",

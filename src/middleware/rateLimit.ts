@@ -32,6 +32,21 @@ export function rateLimit(options?: RateLimitOptions): Middleware {
 
   const sessionCounts = new Map<string, { count: number; resetAt: number }>();
 
+  // Periodically clean up expired entries (every 5 minutes)
+  const cleanupInterval = setInterval(() => {
+    const now = Date.now();
+    for (const [sessionId, record] of sessionCounts.entries()) {
+      if (now >= record.resetAt) {
+        sessionCounts.delete(sessionId);
+      }
+    }
+  }, 5 * 60 * 1000);
+
+  // Allow cleanup to not block process exit
+  if (cleanupInterval.unref) {
+    cleanupInterval.unref();
+  }
+
   return async (event: WaspEvent, next: () => Promise<void>) => {
     if (event.type === 'MESSAGE_SENT') {
       const { sessionId } = event;
@@ -57,6 +72,12 @@ export function rateLimit(options?: RateLimitOptions): Middleware {
 
       // Increment counter
       record.count++;
+    } else if (event.type === 'SESSION_DISCONNECTED') {
+      // Clean up on session disconnect
+      const { reason } = event.data as { reason?: string };
+      if (reason === 'destroyed' || reason === 'loggedOut') {
+        sessionCounts.delete(event.sessionId);
+      }
     }
 
     await next();

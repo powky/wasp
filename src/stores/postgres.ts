@@ -6,6 +6,7 @@
  */
 
 import type { Session, Store, SessionStatus, ProviderType } from '../types.js';
+import { InvalidTableNameError, SessionNotFoundError } from '../errors.js';
 
 // PostgreSQL client type - dynamically imported
 type PgPool = any;
@@ -62,9 +63,16 @@ export class PostgresStore implements Store {
   private initPromise: Promise<void> | null = null;
 
   constructor(config?: PostgresStoreConfig) {
+    const tableName = config?.tableName ?? 'wasp_sessions';
+
+    // Validate table name to prevent SQL injection
+    if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(tableName)) {
+      throw new InvalidTableNameError(tableName);
+    }
+
     this.config = {
       connectionString: config?.connectionString ?? 'postgresql://localhost/wasp',
-      tableName: config?.tableName ?? 'wasp_sessions',
+      tableName,
       autoCreate: config?.autoCreate ?? false,
     };
 
@@ -201,17 +209,16 @@ export class PostgresStore implements Store {
   /**
    * List sessions with optional filter
    */
-  async list(filter?: Partial<Session>): Promise<Session[]> {
+  async list(filter?: Partial<Session>, limit?: number, offset?: number): Promise<Session[]> {
     await this.ensureInitialized();
     if (!this.pool) throw new Error('Pool not initialized');
 
     let sql = `SELECT * FROM ${this.config.tableName}`;
     const params: any[] = [];
     const conditions: string[] = [];
+    let paramCount = 1;
 
     if (filter) {
-      let paramCount = 1;
-
       if (filter.status !== undefined) {
         conditions.push(`status = $${paramCount++}`);
         params.push(filter.status);
@@ -244,6 +251,17 @@ export class PostgresStore implements Store {
 
     sql += ' ORDER BY created_at DESC';
 
+    // Add pagination
+    if (limit !== undefined && limit > 0) {
+      sql += ` LIMIT $${paramCount++}`;
+      params.push(limit);
+    }
+
+    if (offset !== undefined && offset > 0) {
+      sql += ` OFFSET $${paramCount++}`;
+      params.push(offset);
+    }
+
     const result = await this.pool.query(sql, params);
     return result.rows.map(this.rowToSession);
   }
@@ -266,7 +284,7 @@ export class PostgresStore implements Store {
   async update(id: string, updates: Partial<Session>): Promise<void> {
     const session = await this.load(id);
     if (!session) {
-      throw new Error(`Session ${id} not found`);
+      throw new SessionNotFoundError(id);
     }
 
     const updated = { ...session, ...updates };
