@@ -1,0 +1,35 @@
+# Source files (ship dist only)
+src/
+*.ts
+!*.d.ts
+
+# Tests
+**/__tests__/
+**/*.test.ts
+**/*.spec.ts
+coverage/
+.vitest/
+
+# Development
+node_modules/
+.git/
+.github/
+.vscode/
+.idea/
+
+# Config files
+tsconfig.json
+vitest.config.ts
+.eslintrc.js
+.prettierrc
+
+# Docs
+docs/
+*.md
+!README.md
+
+# Misc
+.DS_Store
+*.log
+.env
+.env.*

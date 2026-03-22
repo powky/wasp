@@ -20,7 +20,6 @@ import type {
   WaspEvent,
   EventType,
   Middleware,
-  QueueOptions,
   QueueItem,
 } from './types.js';
 
@@ -269,7 +268,7 @@ export class WaSP extends EventEmitter {
       throw new Error(`Session ${sessionId} not found`);
     }
 
-    const { provider, session } = entry;
+    const { provider } = entry;
 
     // If immediate, bypass queue
     if (options?.immediate) {
@@ -296,7 +295,7 @@ export class WaSP extends EventEmitter {
       options,
       priority: options?.priority ?? 0,
       queuedAt: new Date(),
-      resolve: async (message: Message) => {
+      resolve: async (_message: Message) => {
         // This will be called when queue processes the item
         const sent = await provider.sendMessage(to, content, options);
 
