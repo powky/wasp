@@ -345,6 +345,8 @@ export class BaileysProvider implements Provider {
             }
 
             this.events.emit('message', normalized);
+            // Emit raw Baileys message for consumers that need full message object
+            this.events.emit('raw-message', msg);
             this.events.emit('event', {
               type: EventType.MESSAGE_RECEIVED,
               sessionId: this.currentSessionId!,
