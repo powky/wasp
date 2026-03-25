@@ -48,6 +48,7 @@ export enum EventType {
   GROUP_JOIN = 'GROUP_JOIN',
   GROUP_LEAVE = 'GROUP_LEAVE',
   PRESENCE_UPDATE = 'PRESENCE_UPDATE',
+  REACHOUT_TIMELOCK = 'REACHOUT_TIMELOCK',
 }
 
 /**
@@ -67,6 +68,17 @@ export interface SessionMetadata {
   orgId?: string;
   /** Application-specific data */
   [key: string]: unknown;
+}
+
+/**
+ * Reachout timelock state from WhatsApp
+ */
+export interface ReachoutTimelockInfo {
+  isActive: boolean;
+  enforcementType?: string;
+  expiresAt?: Date;
+  /** Whether new-contact messages are currently blocked */
+  newContactsBlocked: boolean;
 }
 
 /**

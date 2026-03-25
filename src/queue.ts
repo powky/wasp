@@ -31,6 +31,7 @@ export class MessageQueue extends EventEmitter {
   private queues: Map<string, QueueItem[]> = new Map();
   private processing: Map<string, boolean> = new Map();
   private lastSent: Map<string, number> = new Map();
+  private timelocked: Map<string, { expiresAt?: Date; enforcementType?: string }> = new Map();
 
   constructor(options?: Partial<QueueOptions>) {
     super();
@@ -250,6 +251,37 @@ export class MessageQueue extends EventEmitter {
   }
 
   /**
+   * Mark a session as timelocked — new-contact messages will be held
+   */
+  setTimelocked(sessionId: string, expiresAt?: Date, enforcementType?: string): void {
+    this.timelocked.set(sessionId, { expiresAt, enforcementType });
+    this.emit('timelocked', { sessionId, expiresAt, enforcementType });
+  }
+
+  /**
+   * Clear timelock for a session
+   */
+  clearTimelocked(sessionId: string): void {
+    this.timelocked.delete(sessionId);
+    this.emit('timelock-lifted', { sessionId });
+  }
+
+  /**
+   * Check if a session is timelocked
+   */
+  isSessionTimelocked(sessionId: string): boolean {
+    const tl = this.timelocked.get(sessionId);
+    if (!tl) return false;
+    // Auto-clear if expired
+    if (tl.expiresAt && Date.now() >= tl.expiresAt.getTime()) {
+      this.timelocked.delete(sessionId);
+      this.emit('timelock-lifted', { sessionId });
+      return false;
+    }
+    return true;
+  }
+
+  /**
    * Get queue size for a session
    *
    * @param sessionId Session ID
@@ -275,6 +307,7 @@ export class MessageQueue extends EventEmitter {
     }
     this.processing.delete(sessionId);
     this.lastSent.delete(sessionId);
+    this.timelocked.delete(sessionId);
   }
 
   /**
@@ -288,6 +321,7 @@ export class MessageQueue extends EventEmitter {
     this.queues.clear();
     this.processing.clear();
     this.lastSent.clear();
+    this.timelocked.clear();
   }
 
   /**

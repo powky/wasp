@@ -27,6 +27,7 @@ export type {
   QuotedMessage,
   WebhookConfig,
   HealthStats,
+  ReachoutTimelockInfo,
 } from './types.js';
 
 export {

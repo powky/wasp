@@ -74,6 +74,11 @@ export class BaileysProvider implements Provider {
   private isConnecting: boolean = false;
   private isManualDisconnect: boolean = false;
   private _connected: boolean = false;
+  private timelockState: {
+    isActive: boolean;
+    enforcementType?: string;
+    expiresAt?: Date;
+  } | null = null;
 
   // Message deduplication to prevent processing same message multiple times
   private processedMessages: Set<string> = new Set();
@@ -198,6 +203,28 @@ export class BaileysProvider implements Provider {
             sessionId: this.currentSessionId!,
             timestamp: new Date(),
             data: { qr },
+          });
+        }
+
+        // Reachout timelock detection
+        if ((update as any).reachoutTimeLock) {
+          const tl = (update as any).reachoutTimeLock;
+          this.timelockState = {
+            isActive: !!tl.isActive,
+            enforcementType: tl.enforcementType,
+            expiresAt: tl.timeEnforcementEnds,
+          };
+          this.events.emit('reachout-timelock', this.timelockState);
+          this.events.emit('event', {
+            type: EventType.REACHOUT_TIMELOCK,
+            sessionId: this.currentSessionId!,
+            timestamp: new Date(),
+            data: {
+              isActive: this.timelockState.isActive,
+              enforcementType: this.timelockState.enforcementType,
+              expiresAt: this.timelockState.expiresAt,
+              newContactsBlocked: this.timelockState.isActive,
+            },
           });
         }
 
@@ -388,6 +415,7 @@ export class BaileysProvider implements Provider {
     this.phoneNumber = null;
     this.qrCode = null;
     this._connected = false;
+    this.timelockState = null;
     this.processedMessages.clear();
     this.events.emit('disconnected', { shouldReconnect: false });
   }
@@ -502,6 +530,13 @@ export class BaileysProvider implements Provider {
    */
   getPhoneNumber(): string | null {
     return this.phoneNumber;
+  }
+
+  /**
+   * Get current reachout timelock state
+   */
+  getTimelockState(): { isActive: boolean; enforcementType?: string; expiresAt?: Date } | null {
+    return this.timelockState;
   }
 
   /**
