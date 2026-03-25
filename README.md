@@ -15,6 +15,7 @@
 [![CI](https://github.com/kobie3717/wasp/actions/workflows/ci.yml/badge.svg)](https://github.com/kobie3717/wasp/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue.svg)](https://www.typescriptlang.org/)
+[![Discord](https://img.shields.io/badge/Discord-Join%20Chat-5865F2?logo=discord&logoColor=white)](https://discord.gg/Y2jCXNGgE)
 
 **Production-ready infrastructure layer for WhatsApp integrations**
 
@@ -397,6 +398,7 @@ MIT © [Kobus Wentzel](https://github.com/kobie3717)
 
 ## Support
 
+- **Discord:** [Join our community](https://discord.gg/Y2jCXNGgE)
 - **Issues:** [GitHub Issues](https://github.com/kobie3717/wasp/issues)
 - **Discussions:** [GitHub Discussions](https://github.com/kobie3717/wasp/discussions)
 - **Email:** kobie3717@gmail.com
