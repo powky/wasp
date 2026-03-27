@@ -47,6 +47,8 @@ export type { PostgresStoreConfig } from './stores/postgres.js';
 // Providers
 export { BaileysProvider } from './providers/baileys.js';
 export type { BaileysProviderOptions } from './providers/baileys.js';
+export { TcTokenManager } from './providers/baileys-tc-token.js';
+export type { TcToken, TcTokenConfig } from './types.js';
 export { CloudAPIProvider } from './providers/cloud-api.js';
 export type {
   CloudAPIProviderOptions,

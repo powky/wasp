@@ -1,6 +1,6 @@
 {
   "name": "wasp-protocol",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Production-ready WhatsApp Session Protocol - Unified session management, multi-tenant support, and intelligent anti-ban queueing for WhatsApp applications",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",

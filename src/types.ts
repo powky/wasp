@@ -390,3 +390,35 @@ export interface HealthStats {
     heapTotal: number;
   };
 }
+
+/**
+ * TC Token for error 463 prevention
+ */
+export interface TcToken {
+  /** Token buffer (raw bytes) */
+  token: Buffer;
+  /** Receiver timestamp (when token was issued) */
+  timestamp: number;
+  /** Sender timestamp (when we sent the token) */
+  senderTimestamp?: number;
+}
+
+/**
+ * TC Token manager configuration
+ */
+export interface TcTokenConfig {
+  /** Rolling bucket size in seconds (default: 7 days) */
+  bucketSize?: number;
+  /** Number of rolling buckets (default: 4) */
+  numBuckets?: number;
+  /** Sender mode bucket size in seconds (default: 7 days) */
+  senderBucketSize?: number;
+  /** Sender mode number of buckets (default: 4) */
+  senderNumBuckets?: number;
+  /** Pruning interval in ms (default: 24h) */
+  pruneInterval?: number;
+  /** CS token LRU cache size (default: 5) */
+  cstokenCacheSize?: number;
+  /** Disable TC token feature entirely */
+  disabled?: boolean;
+}

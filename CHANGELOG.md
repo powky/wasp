@@ -5,9 +5,23 @@ All notable changes to WaSP (WhatsApp Session Protocol) will be documented in th
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.3.0] - 2026-03-22
+## [0.3.0] - 2026-03-27
 
 ### Added
+- **TC Token / CS Token Support** - Error 463 prevention (MAJOR FEATURE)
+  - Automatic TC token extraction from history sync (field 21, 22, 28)
+  - Automatic TC token extraction from privacy_token notifications
+  - CS token fallback via HMAC-SHA256(nctSalt, recipientLid)
+  - Rolling bucket expiration (28 day default window, configurable)
+  - Monotonicity guard (rejects older tokens)
+  - Automatic token attachment to 1:1 messages (not groups/broadcast)
+  - Automatic privacy token re-issuance (fire-and-forget)
+  - LRU cache for CS tokens (max 5 entries, configurable)
+  - Automatic pruning every 24h (configurable)
+  - Persistent storage to `tc-tokens.json` (base64 serialization)
+  - `TcTokenManager` class (comprehensive token management)
+  - `tcTokenConfig` option in `BaileysProviderOptions`
+  - Can be disabled per-session via `tcTokenConfig.disabled`
 - **CloudAPIProvider** - Meta WhatsApp Cloud API support
   - REST-based provider (no WebSocket, easier deployment)
   - Interactive button messages (up to 3 reply buttons)

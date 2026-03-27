@@ -16,6 +16,7 @@ import type {
 } from '../types.js';
 import { MessageType, EventType } from '../types.js';
 import { InvalidSessionIdError, NotConnectedError } from '../errors.js';
+import { TcTokenManager } from './baileys-tc-token.js';
 
 // Baileys types - dynamically imported
 type BaileysSocket = any;
@@ -39,6 +40,8 @@ export interface BaileysProviderOptions {
   maxReconnectAttempts?: number;
   /** Allowed media directory (for file path security) */
   allowedMediaDir?: string;
+  /** TC token configuration for error 463 prevention */
+  tcTokenConfig?: import('../types.js').TcTokenConfig;
 }
 
 /**
@@ -80,6 +83,9 @@ export class BaileysProvider implements Provider {
     expiresAt?: Date;
   } | null = null;
 
+  // TC Token manager for error 463 prevention
+  private tcTokenManager: TcTokenManager | null = null;
+
   // Message deduplication to prevent processing same message multiple times
   private processedMessages: Set<string> = new Set();
   private readonly MAX_PROCESSED_MESSAGES = 1000;
@@ -93,6 +99,7 @@ export class BaileysProvider implements Provider {
       proxyUrl: options?.proxyUrl ?? '',
       maxReconnectAttempts: options?.maxReconnectAttempts ?? 5,
       allowedMediaDir: options?.allowedMediaDir ?? '',
+      tcTokenConfig: options?.tcTokenConfig ?? {},
     };
 
     // Ensure auth directory exists
@@ -190,6 +197,50 @@ export class BaileysProvider implements Provider {
         // Required for group message handling
         getMessage: async () => undefined,
       });
+
+      // Initialize TC token manager for error 463 prevention
+      if (!this.options.tcTokenConfig?.disabled) {
+        this.tcTokenManager = new TcTokenManager({
+          authDir,
+          sessionId,
+          logger: this.options.logger,
+          config: this.options.tcTokenConfig,
+        });
+        await this.tcTokenManager.load();
+        this.tcTokenManager.startPruning();
+      }
+
+      // Monkey-patch sendMessage to inject TC/CS tokens
+      if (this.tcTokenManager) {
+        const originalSendMessage = this.socket.sendMessage.bind(this.socket);
+        this.socket.sendMessage = async (jid: string, content: any, options?: any) => {
+          // Only attach tokens on 1:1 messages (not groups or broadcast)
+          if (!jid.endsWith('@g.us') && !jid.endsWith('@broadcast')) {
+            const tokenNodes = this.tcTokenManager!.getTokenNodes(jid);
+            if (tokenNodes) {
+              // Baileys accepts additional nodes in options
+              options = options || {};
+              options.additionalNodes = [
+                ...(options.additionalNodes || []),
+                ...tokenNodes,
+              ];
+            }
+          }
+
+          const result = await originalSendMessage(jid, content, options);
+
+          // Fire-and-forget: re-issue TC token if needed
+          if (!jid.endsWith('@g.us') && !jid.endsWith('@broadcast')) {
+            if (this.tcTokenManager!.shouldSendNewToken(jid)) {
+              this.issuePrivacyToken(jid).catch(() => {
+                // Silent fail - fire and forget
+              });
+            }
+          }
+
+          return result;
+        };
+      }
 
       // Handle connection updates
       this.socket.ev.on('connection.update', async (update: any) => {
@@ -347,7 +398,25 @@ export class BaileysProvider implements Provider {
       });
 
       // Handle credentials update
-      this.socket.ev.on('creds.update', saveCreds);
+      this.socket.ev.on('creds.update', async (update: any) => {
+        await saveCreds();
+
+        // TC Token: Extract nctSalt when credentials update
+        if (this.tcTokenManager && update.nctSalt) {
+          this.tcTokenManager.setNctSalt(Buffer.from(update.nctSalt));
+          await this.tcTokenManager.persist();
+        }
+      });
+
+      // TC Token: Extract from history sync
+      if (this.tcTokenManager) {
+        this.socket.ev.on('messaging-history.set', async ({ conversations }: any) => {
+          if (conversations) {
+            this.tcTokenManager!.processHistorySync(conversations);
+            await this.tcTokenManager!.persist();
+          }
+        });
+      }
 
       // Handle incoming messages
       this.socket.ev.on('messages.upsert', async ({ messages, type }: any) => {
@@ -401,6 +470,13 @@ export class BaileysProvider implements Provider {
    */
   async disconnect(): Promise<void> {
     this.isManualDisconnect = true;
+
+    // Persist and cleanup TC token manager
+    if (this.tcTokenManager) {
+      await this.tcTokenManager.persist();
+      this.tcTokenManager.destroy();
+      this.tcTokenManager = null;
+    }
 
     if (this.socket) {
       try {
@@ -640,5 +716,37 @@ export class BaileysProvider implements Provider {
     // Otherwise, assume it's a phone number
     const normalized = identifier.replace(/[^0-9]/g, '');
     return `${normalized}@s.whatsapp.net`;
+  }
+
+  /**
+   * Issue privacy token to recipient (fire-and-forget)
+   *
+   * @param jid Recipient JID
+   */
+  private async issuePrivacyToken(jid: string): Promise<void> {
+    try {
+      // Check if Baileys socket has a privacy token query method
+      // This is implementation-specific to Baileys and may not exist
+      // in all versions. We attempt to call it if available.
+      if (this.socket && typeof (this.socket as any).query === 'function') {
+        // Baileys uses query() for low-level protocol requests
+        await (this.socket as any).query({
+          tag: 'iq',
+          attrs: {
+            to: jid,
+            type: 'get',
+            xmlns: 'encrypt',
+          },
+          content: [
+            {
+              tag: 'key',
+              attrs: {},
+            },
+          ],
+        });
+      }
+    } catch {
+      // Silent fail - this is fire-and-forget
+    }
   }
 }
