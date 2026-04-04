@@ -12,6 +12,7 @@
 ```
 
 [![npm version](https://img.shields.io/npm/v/wasp-protocol.svg)](https://www.npmjs.com/package/wasp-protocol)
+[![npm downloads](https://img.shields.io/npm/dm/wasp-protocol.svg?style=flat-square)](https://www.npmjs.com/package/wasp-protocol)
 [![CI](https://github.com/kobie3717/wasp/actions/workflows/ci.yml/badge.svg)](https://github.com/kobie3717/wasp/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue.svg)](https://www.typescriptlang.org/)
@@ -279,7 +280,7 @@ See [`Dockerfile`](./Dockerfile) and [`docker-compose.yml`](./docker-compose.yml
 
 ## CLI Usage
 
-WaSP provides a simple CLI for testing:
+WaSP provides a CLI for testing and development:
 
 ```bash
 # Start interactive session
@@ -291,8 +292,6 @@ npx wasp-protocol send --to 27821234567 --message "Hello"
 # List sessions
 npx wasp-protocol list
 ```
-
-_(CLI coming in v0.3.0)_
 
 ## API Reference
 
@@ -373,9 +372,9 @@ Full API docs: See TypeScript definitions in [`src/types.ts`](./src/types.ts).
 - [x] Anti-ban queue
 - [x] Middleware system
 - [x] Docker support
+- [x] CLI tool
 - [ ] Whatsmeow provider
 - [ ] Cloud API provider
-- [ ] CLI tool
 - [ ] Webhook system
 - [ ] Message templates
 - [ ] Admin dashboard UI
