@@ -1,0 +1,11 @@
+node_modules
+dist
+coverage
+.git
+*.log
+auth_states
+auth_info_baileys
+sessions
+.env*
+.nyc_output
+*.tsbuildinfo
