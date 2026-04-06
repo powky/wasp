@@ -1,6 +1,6 @@
 {
   "name": "wasp-protocol",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Production-ready WhatsApp Session Protocol - Unified session management, multi-tenant support, and intelligent anti-ban queueing for WhatsApp applications",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
@@ -16,6 +16,7 @@
     "wasp": "./dist/cli.js"
   },
   "scripts": {
+    "postinstall": "[ -f scripts/patch-baileys.sh ] && bash scripts/patch-baileys.sh || true",
     "build": "tsup src/index.ts src/cli.ts --format cjs,esm --dts --clean",
     "dev": "tsup src/index.ts --format cjs,esm --dts --watch",
     "test": "vitest run",
@@ -71,7 +72,7 @@
     "qrcode-terminal": "^0.12.0"
   },
   "peerDependencies": {
-    "@whiskeysockets/baileys": "^7.0.0",
+    "@whiskeysockets/baileys": "^7.0.0-rc.9",
     "ioredis": "^5.0.0",
     "pg": "^8.0.0"
   },
