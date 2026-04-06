@@ -33,11 +33,11 @@ describe('Webhook', () => {
     });
 
     // Create a mock provider
-    const eventHandlers = new Map<string, Function>();
+    const eventHandlers = new Map<string, (...args: any[]) => void>();
     const mockProvider = {
       type: 'BAILEYS' as const,
       events: {
-        on: vi.fn((event: string, handler: Function) => {
+        on: vi.fn((event: string, handler: (...args: any[]) => void) => {
           eventHandlers.set(event, handler);
         }),
         emit: vi.fn(),
@@ -108,11 +108,11 @@ describe('Webhook', () => {
       ],
     });
 
-    const eventHandlers = new Map<string, Function>();
+    const eventHandlers = new Map<string, (...args: any[]) => void>();
     const mockProvider = {
       type: 'BAILEYS' as const,
       events: {
-        on: vi.fn((event: string, handler: Function) => {
+        on: vi.fn((event: string, handler: (...args: any[]) => void) => {
           eventHandlers.set(event, handler);
         }),
         emit: vi.fn(),
@@ -168,11 +168,11 @@ describe('Webhook', () => {
       ],
     });
 
-    const eventHandlers = new Map<string, Function>();
+    const eventHandlers = new Map<string, (...args: any[]) => void>();
     const mockProvider = {
       type: 'BAILEYS' as const,
       events: {
-        on: vi.fn((event: string, handler: Function) => {
+        on: vi.fn((event: string, handler: (...args: any[]) => void) => {
           eventHandlers.set(event, handler);
         }),
         emit: vi.fn(),

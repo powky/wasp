@@ -152,7 +152,6 @@ export class BaileysProvider implements Provider {
       let getContentType: any;
 
       try {
-        // @ts-expect-error - Optional peer dependency, dynamically imported
         const baileys = await import('@whiskeysockets/baileys');
         makeWASocket = baileys.default;
         useMultiFileAuthState = baileys.useMultiFileAuthState;
@@ -177,7 +176,6 @@ export class BaileysProvider implements Provider {
       if (this.options.proxyUrl) {
         try {
           // Note: socks-proxy-agent is optional - users must install separately
-          // @ts-expect-error - Optional peer dependency, dynamically imported
           const module = await import('socks-proxy-agent');
           const SocksProxyAgent = (module as any).SocksProxyAgent;
           agent = new SocksProxyAgent(this.options.proxyUrl);
