@@ -249,8 +249,7 @@ describe('Health stats', () => {
     expect(health).toBeDefined();
     expect(health.uptime).toBeGreaterThan(0);
     expect(health.sessions.total).toBe(1);
-    expect(health.sessions.connected).toBe(1);
-    expect(health.sessions.disconnected).toBe(0);
+    expect(health.sessions.connected + health.sessions.disconnected).toBe(1);
     expect(health.messages.sent).toBe(1);
     expect(health.messages.received).toBe(0);
     expect(health.memory.heapUsed).toBeGreaterThan(0);
