@@ -2,7 +2,7 @@
  * TC Token Manager tests
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { TcTokenManager } from '../providers/baileys-tc-token.js';
 import { promises as fs } from 'fs';
 import path from 'path';
@@ -47,8 +47,6 @@ describe('TcTokenManager', () => {
 
     it('should expire token outside window (receiver mode)', () => {
       const now = Math.floor(Date.now() / 1000);
-      const bucketSize = 7 * 24 * 3600; // 7 days
-      const numBuckets = 4;
       const thirtyDaysAgo = now - 30 * 24 * 3600;
 
       // Token from 30 days ago should be expired (window is 28 days)

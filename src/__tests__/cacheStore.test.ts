@@ -2,7 +2,7 @@
  * CacheStore tests
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { MemoryStore } from '../stores/memory.js';
 
 describe('CacheStore', () => {

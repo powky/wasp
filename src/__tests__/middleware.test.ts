@@ -2,7 +2,7 @@
  * Middleware tests
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { logger } from '../middleware/logger.js';
 import { autoReconnect } from '../middleware/autoReconnect.js';
 import { errorHandler } from '../middleware/errorHandler.js';

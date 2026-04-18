@@ -2,9 +2,8 @@
  * Anti-ban queue tests
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { MessageQueue } from '../queue.js';
-import type { QueueOptions, QueueItem } from '../types.js';
 
 describe('MessageQueue', () => {
   let queue: MessageQueue;
@@ -20,7 +19,7 @@ describe('MessageQueue', () => {
 
   describe('Queueing', () => {
     it('should enqueue a message', async () => {
-      const promise = queue.enqueue({
+      queue.enqueue({
         sessionId: 'session-1',
         to: '27821234567@s.whatsapp.net',
         content: 'Hello',

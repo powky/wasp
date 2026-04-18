@@ -6,7 +6,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { WaSP } from '../wasp.js';
 import { MemoryStore } from '../stores/memory.js';
 import { MockProvider } from '../providers/mock.js';
-import { SessionStatus, ProviderType, EventType } from '../types.js';
+import { ProviderType, EventType } from '../types.js';
 
 describe('WaSP', () => {
   let wasp: WaSP;
@@ -151,7 +151,7 @@ describe('WaSP', () => {
 
   describe('Message queue', () => {
     it('should respect message priority', async () => {
-      const session = await createMockSession('priority-test');
+      await createMockSession('priority-test');
 
       // Queue low priority message
       const lowPromise = wasp.sendMessage('priority-test', '27821234567', 'Low priority', {

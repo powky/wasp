@@ -5,7 +5,7 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { CloudAPIProvider } from '../providers/cloud-api.js';
 import { NotConnectedError, InvalidSessionIdError } from '../errors.js';
-import { MessageType, EventType } from '../types.js';
+import { MessageType } from '../types.js';
 
 // Mock fetch globally
 const mockFetch = vi.fn();

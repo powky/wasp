@@ -2,7 +2,7 @@
  * Timelock tests - reachout throttling detection
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { MessageQueue } from '../queue.js';
 import { EventType } from '../types.js';
 import type { ReachoutTimelockInfo } from '../types.js';
