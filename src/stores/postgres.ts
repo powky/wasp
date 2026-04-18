@@ -5,7 +5,7 @@
  * Recommended for production when you need relational queries.
  */
 
-import type { Session, Store, SessionStatus, ProviderType } from '../types.js';
+import type { Session, Backend, SessionStatus, ProviderType } from '../types.js';
 import { InvalidTableNameError, SessionNotFoundError } from '../errors.js';
 
 // PostgreSQL client type - dynamically imported
@@ -17,8 +17,10 @@ type PgPool = any;
 export interface PostgresStoreConfig {
   /** PostgreSQL connection string */
   connectionString?: string;
-  /** Table name */
+  /** Table name for sessions */
   tableName?: string;
+  /** Table name prefix for all tables (credentials, cache, metrics) */
+  tablePrefix?: string;
   /** Auto-create table if not exists */
   autoCreate?: boolean;
 }
@@ -57,22 +59,35 @@ export interface PostgresStoreConfig {
  * CREATE INDEX idx_wasp_sessions_status ON wasp_sessions(status);
  * ```
  */
-export class PostgresStore implements Store {
+export class PostgresStore implements Backend {
   private pool: PgPool | null = null;
   private config: Required<PostgresStoreConfig>;
   private initPromise: Promise<void> | null = null;
+  private credentialsTable: string;
+  private cacheTable: string;
+  private metricsTable: string;
 
   constructor(config?: PostgresStoreConfig) {
     const tableName = config?.tableName ?? 'wasp_sessions';
+    const tablePrefix = config?.tablePrefix ?? 'wasp';
 
     // Validate table name to prevent SQL injection
     if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(tableName)) {
       throw new InvalidTableNameError(tableName);
     }
 
+    if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(tablePrefix)) {
+      throw new InvalidTableNameError(tablePrefix);
+    }
+
+    this.credentialsTable = `${tablePrefix}_credentials`;
+    this.cacheTable = `${tablePrefix}_cache`;
+    this.metricsTable = `${tablePrefix}_metrics`;
+
     this.config = {
       connectionString: config?.connectionString ?? 'postgresql://localhost/wasp',
       tableName,
+      tablePrefix,
       autoCreate: config?.autoCreate ?? false,
     };
 
@@ -120,7 +135,8 @@ export class PostgresStore implements Store {
   private async createTableIfNotExists(): Promise<void> {
     if (!this.pool) throw new Error('Pool not initialized');
 
-    const createTableSQL = `
+    // Sessions table
+    const createSessionsSQL = `
       CREATE TABLE IF NOT EXISTS ${this.config.tableName} (
         id VARCHAR(255) PRIMARY KEY,
         phone VARCHAR(50),
@@ -140,7 +156,54 @@ export class PostgresStore implements Store {
         ON ${this.config.tableName}(status);
     `;
 
-    await this.pool.query(createTableSQL);
+    // Credentials table
+    const createCredentialsSQL = `
+      CREATE TABLE IF NOT EXISTS ${this.credentialsTable} (
+        session_id VARCHAR(255) NOT NULL,
+        key VARCHAR(255) NOT NULL,
+        value BYTEA NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (session_id, key)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_${this.credentialsTable}_session_id
+        ON ${this.credentialsTable}(session_id);
+    `;
+
+    // Cache table
+    const createCacheSQL = `
+      CREATE TABLE IF NOT EXISTS ${this.cacheTable} (
+        namespace VARCHAR(255) NOT NULL,
+        key VARCHAR(255) NOT NULL,
+        value JSONB NOT NULL,
+        expires_at TIMESTAMP,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (namespace, key)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_${this.cacheTable}_expires_at
+        ON ${this.cacheTable}(expires_at)
+        WHERE expires_at IS NOT NULL;
+    `;
+
+    // Metrics table
+    const createMetricsSQL = `
+      CREATE TABLE IF NOT EXISTS ${this.metricsTable} (
+        session_id VARCHAR(255) NOT NULL,
+        metric VARCHAR(255) NOT NULL,
+        value BIGINT NOT NULL DEFAULT 0,
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (session_id, metric)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_${this.metricsTable}_session_id
+        ON ${this.metricsTable}(session_id);
+    `;
+
+    await this.pool.query(createSessionsSQL);
+    await this.pool.query(createCredentialsSQL);
+    await this.pool.query(createCacheSQL);
+    await this.pool.query(createMetricsSQL);
   }
 
   /**
@@ -316,5 +379,227 @@ export class PostgresStore implements Store {
       await this.pool.end();
       this.pool = null;
     }
+  }
+
+  // ============================================================================
+  // CredentialStore implementation
+  // ============================================================================
+
+  async saveCredential(sessionId: string, key: string, value: string | Buffer): Promise<void> {
+    await this.ensureInitialized();
+    if (!this.pool) throw new Error('Pool not initialized');
+
+    const buffer = Buffer.isBuffer(value) ? value : Buffer.from(value);
+
+    const sql = `
+      INSERT INTO ${this.credentialsTable} (session_id, key, value)
+      VALUES ($1, $2, $3)
+      ON CONFLICT (session_id, key)
+      DO UPDATE SET value = EXCLUDED.value, created_at = NOW()
+    `;
+
+    await this.pool.query(sql, [sessionId, key, buffer]);
+  }
+
+  async loadCredential(sessionId: string, key: string): Promise<string | Buffer | null> {
+    await this.ensureInitialized();
+    if (!this.pool) throw new Error('Pool not initialized');
+
+    const sql = `SELECT value FROM ${this.credentialsTable} WHERE session_id = $1 AND key = $2`;
+    const result = await this.pool.query(sql, [sessionId, key]);
+
+    if (result.rows.length === 0) {
+      return null;
+    }
+
+    return result.rows[0].value;
+  }
+
+  async deleteCredential(sessionId: string, key: string): Promise<void> {
+    await this.ensureInitialized();
+    if (!this.pool) throw new Error('Pool not initialized');
+
+    const sql = `DELETE FROM ${this.credentialsTable} WHERE session_id = $1 AND key = $2`;
+    await this.pool.query(sql, [sessionId, key]);
+  }
+
+  async listCredentialKeys(sessionId: string): Promise<string[]> {
+    await this.ensureInitialized();
+    if (!this.pool) throw new Error('Pool not initialized');
+
+    const sql = `SELECT key FROM ${this.credentialsTable} WHERE session_id = $1`;
+    const result = await this.pool.query(sql, [sessionId]);
+
+    return result.rows.map((row: any) => row.key);
+  }
+
+  async clearCredentials(sessionId: string): Promise<void> {
+    await this.ensureInitialized();
+    if (!this.pool) throw new Error('Pool not initialized');
+
+    const sql = `DELETE FROM ${this.credentialsTable} WHERE session_id = $1`;
+    await this.pool.query(sql, [sessionId]);
+  }
+
+  // ============================================================================
+  // CacheStore implementation
+  // ============================================================================
+
+  async getCached<T = unknown>(namespace: string, key: string): Promise<T | null> {
+    try {
+      await this.ensureInitialized();
+      if (!this.pool) throw new Error('Pool not initialized');
+
+      const sql = `
+        SELECT value FROM ${this.cacheTable}
+        WHERE namespace = $1 AND key = $2
+        AND (expires_at IS NULL OR expires_at > NOW())
+      `;
+      const result = await this.pool.query(sql, [namespace, key]);
+
+      if (result.rows.length === 0) {
+        return null;
+      }
+
+      return result.rows[0].value as T;
+    } catch (error) {
+      // Best-effort semantics
+      console.warn(`[PostgresStore] Cache read error for ${namespace}:${key}:`, error);
+      return null;
+    }
+  }
+
+  async setCached<T = unknown>(namespace: string, key: string, value: T, ttlMs?: number): Promise<void> {
+    try {
+      await this.ensureInitialized();
+      if (!this.pool) throw new Error('Pool not initialized');
+
+      const expiresAt = ttlMs ? new Date(Date.now() + ttlMs) : null;
+
+      const sql = `
+        INSERT INTO ${this.cacheTable} (namespace, key, value, expires_at)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (namespace, key)
+        DO UPDATE SET value = EXCLUDED.value, expires_at = EXCLUDED.expires_at, created_at = NOW()
+      `;
+
+      await this.pool.query(sql, [namespace, key, JSON.stringify(value), expiresAt]);
+    } catch (error) {
+      // Best-effort semantics
+      console.warn(`[PostgresStore] Cache write error for ${namespace}:${key}:`, error);
+    }
+  }
+
+  async deleteCached(namespace: string, key: string): Promise<void> {
+    try {
+      await this.ensureInitialized();
+      if (!this.pool) throw new Error('Pool not initialized');
+
+      const sql = `DELETE FROM ${this.cacheTable} WHERE namespace = $1 AND key = $2`;
+      await this.pool.query(sql, [namespace, key]);
+    } catch (error) {
+      console.warn(`[PostgresStore] Cache delete error for ${namespace}:${key}:`, error);
+    }
+  }
+
+  async clearCache(namespace: string): Promise<void> {
+    try {
+      await this.ensureInitialized();
+      if (!this.pool) throw new Error('Pool not initialized');
+
+      const sql = `DELETE FROM ${this.cacheTable} WHERE namespace = $1`;
+      await this.pool.query(sql, [namespace]);
+    } catch (error) {
+      console.warn(`[PostgresStore] Cache clear error for namespace ${namespace}:`, error);
+    }
+  }
+
+  // ============================================================================
+  // MetricsStore implementation
+  // ============================================================================
+
+  async increment(sessionId: string, metric: string, delta: number = 1): Promise<void> {
+    await this.ensureInitialized();
+    if (!this.pool) throw new Error('Pool not initialized');
+
+    const sql = `
+      INSERT INTO ${this.metricsTable} (session_id, metric, value)
+      VALUES ($1, $2, $3)
+      ON CONFLICT (session_id, metric)
+      DO UPDATE SET value = ${this.metricsTable}.value + EXCLUDED.value, updated_at = NOW()
+    `;
+
+    await this.pool.query(sql, [sessionId, metric, delta]);
+  }
+
+  async get(sessionId: string, metric: string): Promise<number> {
+    await this.ensureInitialized();
+    if (!this.pool) throw new Error('Pool not initialized');
+
+    const sql = `SELECT value FROM ${this.metricsTable} WHERE session_id = $1 AND metric = $2`;
+    const result = await this.pool.query(sql, [sessionId, metric]);
+
+    if (result.rows.length === 0) {
+      return 0;
+    }
+
+    return parseInt(result.rows[0].value, 10);
+  }
+
+  async getAll(sessionId: string): Promise<Record<string, number>> {
+    await this.ensureInitialized();
+    if (!this.pool) throw new Error('Pool not initialized');
+
+    const sql = `SELECT metric, value FROM ${this.metricsTable} WHERE session_id = $1`;
+    const result = await this.pool.query(sql, [sessionId]);
+
+    const metrics: Record<string, number> = {};
+    for (const row of result.rows) {
+      metrics[row.metric] = parseInt(row.value, 10);
+    }
+
+    return metrics;
+  }
+
+  async reset(sessionId: string, metric?: string): Promise<void> {
+    await this.ensureInitialized();
+    if (!this.pool) throw new Error('Pool not initialized');
+
+    if (metric) {
+      const sql = `DELETE FROM ${this.metricsTable} WHERE session_id = $1 AND metric = $2`;
+      await this.pool.query(sql, [sessionId, metric]);
+    } else {
+      const sql = `DELETE FROM ${this.metricsTable} WHERE session_id = $1`;
+      await this.pool.query(sql, [sessionId]);
+    }
+  }
+
+  /**
+   * Get total credential count across all sessions
+   */
+  async getTotalCredentialCount(): Promise<number> {
+    await this.ensureInitialized();
+    if (!this.pool) throw new Error('Pool not initialized');
+
+    const sql = `SELECT COUNT(*) as count FROM ${this.credentialsTable}`;
+    const result = await this.pool.query(sql);
+
+    return parseInt(result.rows[0]?.count ?? 0, 10);
+  }
+
+  /**
+   * Get cache size
+   */
+  async getCacheSize(): Promise<number> {
+    await this.ensureInitialized();
+    if (!this.pool) throw new Error('Pool not initialized');
+
+    const sql = `
+      SELECT COUNT(*) as count FROM ${this.cacheTable}
+      WHERE expires_at IS NULL OR expires_at > NOW()
+    `;
+    const result = await this.pool.query(sql);
+
+    return parseInt(result.rows[0]?.count ?? 0, 10);
   }
 }

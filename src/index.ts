@@ -11,6 +11,9 @@
 export { WaSP } from './wasp.js';
 export { MessageQueue } from './queue.js';
 export { WebhookManager } from './webhook.js';
+export { wrapSocket } from './wrap-socket.js';
+export type { WrappedSocket } from './wrap-socket.js';
+export { ClockSync } from './clock-sync.js';
 
 // Types
 export type {
@@ -19,6 +22,11 @@ export type {
   Message,
   Provider,
   Store,
+  SessionStore,
+  CredentialStore,
+  CacheStore,
+  MetricsStore,
+  Backend,
   WaspEvent,
   SendMessageOptions,
   QueueOptions,
@@ -28,6 +36,9 @@ export type {
   WebhookConfig,
   HealthStats,
   ReachoutTimelockInfo,
+  ClockSyncConfig,
+  ClockSyncSample,
+  ClockSyncStats,
 } from './types.js';
 
 export {

@@ -5,7 +5,7 @@
  * Recommended for production multi-instance deployments.
  */
 
-import type { Session, Store } from '../types.js';
+import type { Session, Backend } from '../types.js';
 import { SessionNotFoundError } from '../errors.js';
 
 // Redis client type - dynamically imported
@@ -48,7 +48,7 @@ export interface RedisStoreConfig {
  * });
  * ```
  */
-export class RedisStore implements Store {
+export class RedisStore implements Backend {
   private redis: RedisClient | null = null;
   private config: Required<RedisStoreConfig>;
   private initPromise: Promise<void> | null = null;
@@ -281,5 +281,273 @@ export class RedisStore implements Store {
       await this.redis.quit();
       this.redis = null;
     }
+  }
+
+  // ============================================================================
+  // CredentialStore implementation
+  // ============================================================================
+
+  async saveCredential(sessionId: string, key: string, value: string | Buffer): Promise<void> {
+    await this.ensureInitialized();
+    if (!this.redis) throw new Error('Redis not initialized');
+
+    const redisKey = `wasp:cred:${sessionId}:${key}`;
+    const serialized = Buffer.isBuffer(value) ? value.toString('base64') : value;
+
+    await this.redis.set(redisKey, serialized);
+  }
+
+  async loadCredential(sessionId: string, key: string): Promise<string | Buffer | null> {
+    await this.ensureInitialized();
+    if (!this.redis) throw new Error('Redis not initialized');
+
+    const redisKey = `wasp:cred:${sessionId}:${key}`;
+    const data = await this.redis.get(redisKey);
+
+    if (!data) {
+      return null;
+    }
+
+    // Try to decode as base64 Buffer, fallback to string
+    try {
+      return Buffer.from(data, 'base64');
+    } catch {
+      return data;
+    }
+  }
+
+  async deleteCredential(sessionId: string, key: string): Promise<void> {
+    await this.ensureInitialized();
+    if (!this.redis) throw new Error('Redis not initialized');
+
+    const redisKey = `wasp:cred:${sessionId}:${key}`;
+    await this.redis.del(redisKey);
+  }
+
+  async listCredentialKeys(sessionId: string): Promise<string[]> {
+    await this.ensureInitialized();
+    if (!this.redis) throw new Error('Redis not initialized');
+
+    const pattern = `wasp:cred:${sessionId}:*`;
+    const keys: string[] = [];
+
+    let cursor = '0';
+    do {
+      const result = await this.redis.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+      cursor = result[0];
+      keys.push(...result[1]);
+    } while (cursor !== '0');
+
+    // Extract key names (remove prefix)
+    const prefix = `wasp:cred:${sessionId}:`;
+    return keys.map((k) => k.substring(prefix.length));
+  }
+
+  async clearCredentials(sessionId: string): Promise<void> {
+    await this.ensureInitialized();
+    if (!this.redis) throw new Error('Redis not initialized');
+
+    const pattern = `wasp:cred:${sessionId}:*`;
+    let cursor = '0';
+
+    do {
+      const result = await this.redis.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+      cursor = result[0];
+
+      if (result[1].length > 0) {
+        await this.redis.del(...result[1]);
+      }
+    } while (cursor !== '0');
+  }
+
+  // ============================================================================
+  // CacheStore implementation
+  // ============================================================================
+
+  async getCached<T = unknown>(namespace: string, key: string): Promise<T | null> {
+    try {
+      await this.ensureInitialized();
+      if (!this.redis) throw new Error('Redis not initialized');
+
+      const redisKey = `wasp:cache:${namespace}:${key}`;
+      const data = await this.redis.get(redisKey);
+
+      if (!data) {
+        return null;
+      }
+
+      return JSON.parse(data) as T;
+    } catch (error) {
+      // Best-effort semantics
+      console.warn(`[RedisStore] Cache read error for ${namespace}:${key}:`, error);
+      return null;
+    }
+  }
+
+  async setCached<T = unknown>(namespace: string, key: string, value: T, ttlMs?: number): Promise<void> {
+    try {
+      await this.ensureInitialized();
+      if (!this.redis) throw new Error('Redis not initialized');
+
+      const redisKey = `wasp:cache:${namespace}:${key}`;
+      const serialized = JSON.stringify(value);
+
+      if (ttlMs) {
+        const ttlSeconds = Math.ceil(ttlMs / 1000);
+        await this.redis.set(redisKey, serialized, 'EX', ttlSeconds);
+      } else {
+        await this.redis.set(redisKey, serialized);
+      }
+    } catch (error) {
+      // Best-effort semantics
+      console.warn(`[RedisStore] Cache write error for ${namespace}:${key}:`, error);
+    }
+  }
+
+  async deleteCached(namespace: string, key: string): Promise<void> {
+    try {
+      await this.ensureInitialized();
+      if (!this.redis) throw new Error('Redis not initialized');
+
+      const redisKey = `wasp:cache:${namespace}:${key}`;
+      await this.redis.del(redisKey);
+    } catch (error) {
+      console.warn(`[RedisStore] Cache delete error for ${namespace}:${key}:`, error);
+    }
+  }
+
+  async clearCache(namespace: string): Promise<void> {
+    try {
+      await this.ensureInitialized();
+      if (!this.redis) throw new Error('Redis not initialized');
+
+      const pattern = `wasp:cache:${namespace}:*`;
+      let cursor = '0';
+
+      do {
+        const result = await this.redis.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+        cursor = result[0];
+
+        if (result[1].length > 0) {
+          await this.redis.del(...result[1]);
+        }
+      } while (cursor !== '0');
+    } catch (error) {
+      console.warn(`[RedisStore] Cache clear error for namespace ${namespace}:`, error);
+    }
+  }
+
+  // ============================================================================
+  // MetricsStore implementation
+  // ============================================================================
+
+  async increment(sessionId: string, metric: string, delta: number = 1): Promise<void> {
+    await this.ensureInitialized();
+    if (!this.redis) throw new Error('Redis not initialized');
+
+    const redisKey = `wasp:metrics:${sessionId}:${metric}`;
+    await this.redis.incrby(redisKey, delta);
+  }
+
+  async get(sessionId: string, metric: string): Promise<number> {
+    await this.ensureInitialized();
+    if (!this.redis) throw new Error('Redis not initialized');
+
+    const redisKey = `wasp:metrics:${sessionId}:${metric}`;
+    const value = await this.redis.get(redisKey);
+
+    return value ? parseInt(value, 10) : 0;
+  }
+
+  async getAll(sessionId: string): Promise<Record<string, number>> {
+    await this.ensureInitialized();
+    if (!this.redis) throw new Error('Redis not initialized');
+
+    const pattern = `wasp:metrics:${sessionId}:*`;
+    const keys: string[] = [];
+    let cursor = '0';
+
+    do {
+      const result = await this.redis.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+      cursor = result[0];
+      keys.push(...result[1]);
+    } while (cursor !== '0');
+
+    if (keys.length === 0) {
+      return {};
+    }
+
+    const values = await this.redis.mget(keys);
+    const metrics: Record<string, number> = {};
+    const prefix = `wasp:metrics:${sessionId}:`;
+
+    for (let i = 0; i < keys.length; i++) {
+      const metricName = keys[i].substring(prefix.length);
+      metrics[metricName] = values[i] ? parseInt(values[i], 10) : 0;
+    }
+
+    return metrics;
+  }
+
+  async reset(sessionId: string, metric?: string): Promise<void> {
+    await this.ensureInitialized();
+    if (!this.redis) throw new Error('Redis not initialized');
+
+    if (metric) {
+      const redisKey = `wasp:metrics:${sessionId}:${metric}`;
+      await this.redis.del(redisKey);
+    } else {
+      const pattern = `wasp:metrics:${sessionId}:*`;
+      let cursor = '0';
+
+      do {
+        const result = await this.redis.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+        cursor = result[0];
+
+        if (result[1].length > 0) {
+          await this.redis.del(...result[1]);
+        }
+      } while (cursor !== '0');
+    }
+  }
+
+  /**
+   * Get total credential count across all sessions
+   */
+  async getTotalCredentialCount(): Promise<number> {
+    await this.ensureInitialized();
+    if (!this.redis) throw new Error('Redis not initialized');
+
+    const pattern = 'wasp:cred:*';
+    let count = 0;
+    let cursor = '0';
+
+    do {
+      const result = await this.redis.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+      cursor = result[0];
+      count += result[1].length;
+    } while (cursor !== '0');
+
+    return count;
+  }
+
+  /**
+   * Get cache size
+   */
+  async getCacheSize(): Promise<number> {
+    await this.ensureInitialized();
+    if (!this.redis) throw new Error('Redis not initialized');
+
+    const pattern = 'wasp:cache:*';
+    let count = 0;
+    let cursor = '0';
+
+    do {
+      const result = await this.redis.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+      cursor = result[0];
+      count += result[1].length;
+    } while (cursor !== '0');
+
+    return count;
   }
 }

@@ -10,13 +10,17 @@ import { MessageQueue } from './queue.js';
 import { MemoryStore } from './stores/memory.js';
 import { SessionNotFoundError } from './errors.js';
 import { WebhookManager } from './webhook.js';
+import { ClockSync } from './clock-sync.js';
 import type {
   WaspConfig,
   Session,
   SessionStatus,
   Provider,
   ProviderType,
-  Store,
+  SessionStore,
+  CredentialStore,
+  CacheStore,
+  MetricsStore,
   Message,
   SendMessageOptions,
   WaspEvent,
@@ -29,8 +33,7 @@ import type {
 /**
  * Default WaSP configuration
  */
-const DEFAULT_CONFIG: Required<Omit<WaspConfig, 'logger' | 'webhooks'>> & Pick<WaspConfig, 'logger' | 'webhooks'> = {
-  store: new MemoryStore(),
+const DEFAULT_CONFIG = {
   queue: {
     minDelay: 2000,
     maxDelay: 5000,
@@ -39,8 +42,6 @@ const DEFAULT_CONFIG: Required<Omit<WaspConfig, 'logger' | 'webhooks'>> & Pick<W
   },
   defaultProvider: 'BAILEYS' as ProviderType,
   debug: false,
-  logger: undefined,
-  webhooks: undefined,
 };
 
 /**
@@ -73,10 +74,14 @@ const DEFAULT_CONFIG: Required<Omit<WaspConfig, 'logger' | 'webhooks'>> & Pick<W
  * ```
  */
 export class WaSP extends EventEmitter {
-  private config: Required<Omit<WaspConfig, 'logger' | 'webhooks'>> & Pick<WaspConfig, 'logger' | 'webhooks'>;
-  private store: Store;
+  private config: WaspConfig;
+  private sessionStore: SessionStore;
+  private credStore: CredentialStore;
+  private cacheStoreImpl: CacheStore;
+  private metricsStoreImpl: MetricsStore;
+  private clockSyncImpl: ClockSync;
   private queue: MessageQueue;
-  private sessions: Map<string, { session: Session; provider: Provider }> = new Map();
+  private activeSessions: Map<string, { session: Session; provider: Provider }> = new Map();
   private middlewares: Middleware[] = [];
   private webhookManager: WebhookManager | null = null;
   private startTime: number = Date.now();
@@ -94,7 +99,24 @@ export class WaSP extends EventEmitter {
       queue: { ...DEFAULT_CONFIG.queue, ...config?.queue },
     };
 
-    this.store = config?.store ?? new MemoryStore();
+    // Initialize backend stores
+    // If backend is provided, use it for all four interfaces
+    // Otherwise, use individual stores or fall back to MemoryStore
+    const memoryStore = new MemoryStore();
+
+    if (config?.backend) {
+      this.sessionStore = config.backend;
+      this.credStore = config.backend;
+      this.cacheStoreImpl = config.backend;
+      this.metricsStoreImpl = config.backend;
+    } else {
+      this.sessionStore = config?.store ?? memoryStore;
+      this.credStore = config?.credentialStore ?? memoryStore;
+      this.cacheStoreImpl = config?.cacheStore ?? memoryStore;
+      this.metricsStoreImpl = config?.metricsStore ?? memoryStore;
+    }
+
+    this.clockSyncImpl = new ClockSync();
     this.queue = new MessageQueue(this.config.queue);
 
     // Setup webhooks if configured
@@ -129,7 +151,7 @@ export class WaSP extends EventEmitter {
     options?: { orgId?: string; metadata?: Record<string, unknown> }
   ): Promise<Session> {
     // Check if session already exists
-    if (this.sessions.has(id)) {
+    if (this.activeSessions.has(id)) {
       throw new Error(`Session ${id} already exists`);
     }
 
@@ -137,20 +159,20 @@ export class WaSP extends EventEmitter {
     const session: Session = {
       id,
       status: 'CONNECTING' as SessionStatus,
-      provider: providerType ?? this.config.defaultProvider,
+      provider: providerType ?? this.config.defaultProvider ?? DEFAULT_CONFIG.defaultProvider,
       orgId: options?.orgId,
       createdAt: new Date(),
       metadata: options?.metadata,
     };
 
     // Save to store
-    await this.store.save(session);
+    await this.sessionStore.save(session);
 
     // Create provider instance
     const provider = await this.createProvider(session.provider, options);
 
     // Store session and provider
-    this.sessions.set(id, { session, provider });
+    this.activeSessions.set(id, { session, provider });
 
     // Setup provider event handlers
     this.setupProviderEvents(id, provider);
@@ -163,7 +185,7 @@ export class WaSP extends EventEmitter {
       session.status = 'CONNECTED' as SessionStatus;
       session.connectedAt = new Date();
       session.phone = provider.getPhoneNumber() ?? undefined;
-      await this.store.update(id, session);
+      await this.sessionStore.update(id, session);
 
       this.log('info', 'Session created', { sessionId: id, provider: session.provider });
 
@@ -173,8 +195,8 @@ export class WaSP extends EventEmitter {
       return session;
     } catch (error) {
       // Clean up on connection failure
-      this.sessions.delete(id);
-      await this.store.delete(id);
+      this.activeSessions.delete(id);
+      await this.sessionStore.delete(id);
       throw error;
     }
   }
@@ -187,7 +209,7 @@ export class WaSP extends EventEmitter {
    * @param id Session ID
    */
   async destroySession(id: string): Promise<void> {
-    const entry = this.sessions.get(id);
+    const entry = this.activeSessions.get(id);
     if (!entry) {
       throw new SessionNotFoundError(id);
     }
@@ -204,10 +226,10 @@ export class WaSP extends EventEmitter {
     this.queue.clearQueue(id);
 
     // Remove from sessions map
-    this.sessions.delete(id);
+    this.activeSessions.delete(id);
 
     // Delete from store
-    await this.store.delete(id);
+    await this.sessionStore.delete(id);
 
     this.log('info', 'Session destroyed', { sessionId: id });
 
@@ -228,13 +250,13 @@ export class WaSP extends EventEmitter {
    */
   async getSession(id: string): Promise<Session | null> {
     // Try memory first
-    const entry = this.sessions.get(id);
+    const entry = this.activeSessions.get(id);
     if (entry) {
       return { ...entry.session };
     }
 
     // Try store
-    return await this.store.load(id);
+    return await this.sessionStore.load(id);
   }
 
   /**
@@ -244,7 +266,7 @@ export class WaSP extends EventEmitter {
    * @returns Array of sessions
    */
   async listSessions(filter?: Partial<Session>): Promise<Session[]> {
-    return await this.store.list(filter);
+    return await this.sessionStore.list(filter);
   }
 
   /**
@@ -276,7 +298,7 @@ export class WaSP extends EventEmitter {
     content: string,
     options?: SendMessageOptions
   ): Promise<Message> {
-    const entry = this.sessions.get(sessionId);
+    const entry = this.activeSessions.get(sessionId);
     if (!entry) {
       throw new SessionNotFoundError(sessionId);
     }
@@ -297,7 +319,7 @@ export class WaSP extends EventEmitter {
       });
 
       // Update last activity
-      await this.store.update(sessionId, { lastActivityAt: new Date() });
+      await this.sessionStore.update(sessionId, { lastActivityAt: new Date() });
 
       return message;
     }
@@ -324,7 +346,7 @@ export class WaSP extends EventEmitter {
         });
 
         // Update last activity
-        await this.store.update(sessionId, { lastActivityAt: new Date() });
+        await this.sessionStore.update(sessionId, { lastActivityAt: new Date() });
 
         return sent;
       },
@@ -387,7 +409,7 @@ export class WaSP extends EventEmitter {
    * Get session count
    */
   getSessionCount(): number {
-    return this.sessions.size;
+    return this.activeSessions.size;
   }
 
   /**
@@ -397,7 +419,7 @@ export class WaSP extends EventEmitter {
    * @returns Provider instance or null if session not found
    */
   getProvider(sessionId: string): Provider | null {
-    const entry = this.sessions.get(sessionId);
+    const entry = this.activeSessions.get(sessionId);
     return entry?.provider ?? null;
   }
 
@@ -407,7 +429,42 @@ export class WaSP extends EventEmitter {
    * @returns Array of session IDs
    */
   getSessions(): string[] {
-    return Array.from(this.sessions.keys());
+    return Array.from(this.activeSessions.keys());
+  }
+
+  /**
+   * Get session store
+   */
+  get sessions(): SessionStore {
+    return this.sessionStore;
+  }
+
+  /**
+   * Get credential store
+   */
+  get credentials(): CredentialStore {
+    return this.credStore;
+  }
+
+  /**
+   * Get cache store
+   */
+  get cache(): CacheStore {
+    return this.cacheStoreImpl;
+  }
+
+  /**
+   * Get metrics store
+   */
+  get metrics(): MetricsStore {
+    return this.metricsStoreImpl;
+  }
+
+  /**
+   * Get clock sync
+   */
+  get clock(): ClockSync {
+    return this.clockSyncImpl;
   }
 
   /**
@@ -427,11 +484,23 @@ export class WaSP extends EventEmitter {
    * ```
    */
   getHealth(): HealthStats {
-    const sessions = Array.from(this.sessions.values());
+    const sessions = Array.from(this.activeSessions.values());
     const connectedCount = sessions.filter((s) => s.session.status === 'CONNECTED').length;
     const disconnectedCount = sessions.length - connectedCount;
 
     const memUsage = process.memoryUsage();
+
+    // Get cache size if MemoryStore
+    let cacheSize = 0;
+    if (this.cacheStoreImpl instanceof MemoryStore) {
+      cacheSize = this.cacheStoreImpl.getCacheSize();
+    }
+
+    // Get credential count if MemoryStore
+    let credentialCount = 0;
+    if (this.credStore instanceof MemoryStore) {
+      credentialCount = this.credStore.getTotalCredentialCount();
+    }
 
     return {
       uptime: Date.now() - this.startTime,
@@ -448,6 +517,9 @@ export class WaSP extends EventEmitter {
         heapUsed: memUsage.heapUsed,
         heapTotal: memUsage.heapTotal,
       },
+      clockSync: this.clockSyncImpl.getStats(),
+      cache: cacheSize > 0 ? { size: cacheSize } : undefined,
+      credentials: credentialCount > 0 ? { total: credentialCount } : undefined,
     };
   }
 
@@ -482,7 +554,7 @@ export class WaSP extends EventEmitter {
   private setupProviderEvents(sessionId: string, provider: Provider): void {
     // Connected
     provider.events.on('connected', async (data) => {
-      await this.store.update(sessionId, {
+      await this.sessionStore.update(sessionId, {
         status: 'CONNECTED' as SessionStatus,
         connectedAt: new Date(),
         phone: data.phone,
@@ -498,7 +570,7 @@ export class WaSP extends EventEmitter {
 
     // Disconnected
     provider.events.on('disconnected', async (data) => {
-      await this.store.update(sessionId, {
+      await this.sessionStore.update(sessionId, {
         status: 'DISCONNECTED' as SessionStatus,
       });
 
@@ -524,7 +596,7 @@ export class WaSP extends EventEmitter {
     provider.events.on('message', async (message: Message) => {
       this.messageStats.received++;
 
-      await this.store.update(sessionId, { lastActivityAt: new Date() });
+      await this.sessionStore.update(sessionId, { lastActivityAt: new Date() });
 
       await this.emitEvent({
         type: 'MESSAGE_RECEIVED' as EventType,

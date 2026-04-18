@@ -251,9 +251,9 @@ export interface Provider {
 }
 
 /**
- * Store interface - pluggable session storage
+ * Session store interface - CRUD operations for session data
  */
-export interface Store {
+export interface SessionStore {
   /**
    * Save session state
    * @param session Session to save
@@ -295,6 +295,128 @@ export interface Store {
 }
 
 /**
+ * Store interface - pluggable session storage
+ * @deprecated Use SessionStore instead (backward compatibility alias)
+ */
+export type Store = SessionStore;
+
+/**
+ * Credential store interface - auth tokens, device credentials, encrypted keys
+ */
+export interface CredentialStore {
+  /**
+   * Save a credential
+   * @param sessionId Session ID
+   * @param key Credential key (e.g., 'auth-token', 'device-key')
+   * @param value Credential value (string or Buffer)
+   */
+  saveCredential(sessionId: string, key: string, value: string | Buffer): Promise<void>;
+
+  /**
+   * Load a credential
+   * @param sessionId Session ID
+   * @param key Credential key
+   * @returns Credential value or null if not found
+   */
+  loadCredential(sessionId: string, key: string): Promise<string | Buffer | null>;
+
+  /**
+   * Delete a credential
+   * @param sessionId Session ID
+   * @param key Credential key
+   */
+  deleteCredential(sessionId: string, key: string): Promise<void>;
+
+  /**
+   * List all credential keys for a session
+   * @param sessionId Session ID
+   * @returns Array of credential keys
+   */
+  listCredentialKeys(sessionId: string): Promise<string[]>;
+
+  /**
+   * Clear all credentials for a session
+   * @param sessionId Session ID
+   */
+  clearCredentials(sessionId: string): Promise<void>;
+}
+
+/**
+ * Cache store interface - namespaced ephemeral data with TTL support
+ */
+export interface CacheStore {
+  /**
+   * Get cached value
+   * @param namespace Cache namespace (e.g., 'group', 'device')
+   * @param key Cache key
+   * @returns Cached value or null if not found/expired
+   */
+  getCached<T = unknown>(namespace: string, key: string): Promise<T | null>;
+
+  /**
+   * Set cached value
+   * @param namespace Cache namespace
+   * @param key Cache key
+   * @param value Value to cache
+   * @param ttlMs Optional TTL in milliseconds (undefined = no expiry)
+   */
+  setCached<T = unknown>(namespace: string, key: string, value: T, ttlMs?: number): Promise<void>;
+
+  /**
+   * Delete cached value
+   * @param namespace Cache namespace
+   * @param key Cache key
+   */
+  deleteCached(namespace: string, key: string): Promise<void>;
+
+  /**
+   * Clear all cached values in a namespace
+   * @param namespace Cache namespace
+   */
+  clearCache(namespace: string): Promise<void>;
+}
+
+/**
+ * Metrics store interface - health stats and per-session counters
+ */
+export interface MetricsStore {
+  /**
+   * Increment a metric counter
+   * @param sessionId Session ID
+   * @param metric Metric name
+   * @param delta Amount to increment by (default: 1)
+   */
+  increment(sessionId: string, metric: string, delta?: number): Promise<void>;
+
+  /**
+   * Get a metric value
+   * @param sessionId Session ID
+   * @param metric Metric name
+   * @returns Metric value (0 if not found)
+   */
+  get(sessionId: string, metric: string): Promise<number>;
+
+  /**
+   * Get all metrics for a session
+   * @param sessionId Session ID
+   * @returns Record of metric names to values
+   */
+  getAll(sessionId: string): Promise<Record<string, number>>;
+
+  /**
+   * Reset metrics for a session
+   * @param sessionId Session ID
+   * @param metric Optional specific metric to reset (undefined = reset all)
+   */
+  reset(sessionId: string, metric?: string): Promise<void>;
+}
+
+/**
+ * Backend interface - composes all four domain stores
+ */
+export interface Backend extends SessionStore, CredentialStore, CacheStore, MetricsStore {}
+
+/**
  * Webhook configuration
  */
 export interface WebhookConfig {
@@ -315,7 +437,19 @@ export interface WebhookConfig {
  */
 export interface WaspConfig {
   /** Session store (defaults to in-memory) */
-  store?: Store;
+  store?: SessionStore;
+
+  /** Full backend implementation (overrides individual stores) */
+  backend?: Backend;
+
+  /** Credential store (auth tokens, device keys) */
+  credentialStore?: CredentialStore;
+
+  /** Cache store (namespaced ephemeral data) */
+  cacheStore?: CacheStore;
+
+  /** Metrics store (session counters) */
+  metricsStore?: MetricsStore;
 
   /** Message queue options */
   queue?: Partial<QueueOptions>;
@@ -368,6 +502,44 @@ export interface QueueItem {
 }
 
 /**
+ * Clock sync sample for RTT-adjusted time synchronization
+ */
+export interface ClockSyncSample {
+  /** Local timestamp when request was sent (ms since epoch) */
+  localSentAt: number;
+  /** Local timestamp when response was received (ms since epoch) */
+  localReceivedAt: number;
+  /** Server timestamp reported in response (ms since epoch) */
+  serverTimestamp: number;
+}
+
+/**
+ * Clock sync statistics
+ */
+export interface ClockSyncStats {
+  /** Estimated clock skew in ms (negative = local ahead, positive = local behind) */
+  skewMs: number;
+  /** Estimated round-trip time in ms */
+  estimatedRttMs: number;
+  /** Number of samples collected */
+  sampleCount: number;
+  /** Confidence level based on sample count and variance */
+  confidence: 'low' | 'medium' | 'high';
+  /** Timestamp when stats were last updated */
+  lastUpdatedAt: number;
+}
+
+/**
+ * Clock sync configuration
+ */
+export interface ClockSyncConfig {
+  /** Rolling window size for samples (default: 10) */
+  sampleWindowSize?: number;
+  /** Minimum RTT samples before trusting skew (default: 3) */
+  minRttSamples?: number;
+}
+
+/**
  * Health/stats information
  */
 export interface HealthStats {
@@ -388,6 +560,16 @@ export interface HealthStats {
   memory: {
     heapUsed: number;
     heapTotal: number;
+  };
+  /** Clock sync statistics */
+  clockSync?: ClockSyncStats;
+  /** Cache statistics */
+  cache?: {
+    size: number;
+  };
+  /** Credential count */
+  credentials?: {
+    total: number;
   };
 }
 
